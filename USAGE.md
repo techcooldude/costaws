@@ -1,5 +1,17 @@
 # AWS Cost AI Agent - Usage Guide
 
+**Version 3.1.0 - Production Ready**
+
+## 🔐 API Authentication
+
+All protected endpoints require an API key. Include in requests:
+```
+Header: X-API-Key: your_api_key_here
+```
+
+**Public endpoints (no auth):** `/api/health`, `/api/`  
+**Protected endpoints:** Everything else
+
 ## 📖 Table of Contents
 
 1. [Quick Start](#quick-start)
