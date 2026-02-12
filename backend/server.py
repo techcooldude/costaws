@@ -1203,7 +1203,7 @@ class EmailService:
                     </div>
                     
                     <div class="ai-section">
-                        <h3 style="margin: 0 0 10px 0; color: #92400e;">🧠 AI Analysis (Gemini 3 Flash)</h3>
+                        <h3 style="margin: 0 0 10px 0; color: #92400e;">🧠 AI Analysis (Gemini)</h3>
                         <div style="white-space: pre-wrap;">{ai_text}</div>
                     </div>
                     
