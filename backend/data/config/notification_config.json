@@ -1,0 +1,13 @@
+{
+  "id": "77472179-920f-421a-96bd-8308b1085dba",
+  "anomaly_threshold": 20.0,
+  "schedule_day": "monday",
+  "schedule_hour": 9,
+  "global_admin_emails": [],
+  "smtp_host": "",
+  "smtp_port": 587,
+  "smtp_user": "",
+  "smtp_password": "",
+  "sender_email": "",
+  "updated_at": "2026-02-12T01:59:57.967320+00:00"
+}

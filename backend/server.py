@@ -1086,14 +1086,16 @@ async def get_scheduler_status():
 async def get_storage_info():
     """Get S3 storage information"""
     return {
-        "type": "AWS S3",
-        "bucket": storage.bucket_name,
+        "type": "AWS S3" if storage.use_s3 else "Local File (Demo Mode)",
+        "bucket": storage.bucket_name if storage.use_s3 else str(storage.local_storage_dir),
+        "s3_configured": storage.use_s3,
         "structure": {
             "config/": "Notification configuration",
             "teams/": "Team mappings",
             "costs/{year}/{month}/": "Cost history records",
             "anomalies/{year}/{month}/": "Detected anomalies"
-        }
+        },
+        "note": "Add AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY to .env for S3 storage" if not storage.use_s3 else None
     }
 
 # Include the router
