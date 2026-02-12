@@ -2,7 +2,17 @@
 
 ## AI-Powered AWS Cost Monitoring & Optimization
 
+**Version 3.1.0 - Production Ready • Security Hardened**
+
 An intelligent automation agent that learns your AWS cost patterns, predicts future costs, detects anomalies, and provides optimization recommendations using **Gemini 3 Flash AI**.
+
+### Security Features (v3.1.0)
+- ✅ API authentication with X-API-Key header
+- ✅ SMTP credentials stored only in .env (never in S3/JSON)
+- ✅ IAM role support for AWS (recommended over access keys)
+- ✅ Correct Datadog Cloud Cost Management API
+- ✅ Explicit UTC timezone in scheduler
+- ✅ Service binds to localhost only by default
 
 ---
 
