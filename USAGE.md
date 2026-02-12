@@ -29,22 +29,33 @@ Header: X-API-Key: your_api_key_here
 
 ### Check Agent Status
 ```bash
-# Is the agent running?
+# Health check (no auth required)
 curl http://localhost:8001/api/health
 
 # Expected response:
 {
   "status": "healthy",
   "storage": "S3",
-  "ai_configured": true
+  "ai_configured": true,
+  "datadog_configured": true,
+  "smtp_configured": true
 }
+```
+
+### Set Your API Key
+```bash
+# Get your API key from .env
+API_KEY=$(grep AGENT_API_KEY /opt/aws-cost-agent/.env | cut -d '=' -f2)
+
+# Use in all protected requests
+curl -H "X-API-Key: $API_KEY" http://localhost:8001/api/teams
 ```
 
 ### Check Scheduler
 ```bash
-curl http://localhost:8001/api/scheduler/status
+curl -H "X-API-Key: $API_KEY" http://localhost:8001/api/scheduler/status
 
-# Shows next scheduled run time
+# Shows next scheduled run time (in UTC)
 ```
 
 ---
