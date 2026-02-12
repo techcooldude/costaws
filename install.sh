@@ -261,7 +261,7 @@ pip install --quiet \
     apscheduler \
     httpx \
     boto3 \
-    emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
+    google-generativeai
 
 echo -e "${GREEN}✅ Dependencies installed${NC}"
 
