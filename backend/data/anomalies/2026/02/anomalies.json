@@ -1,0 +1,30 @@
+{
+  "month": "2026-02",
+  "anomalies": [
+    {
+      "id": "6d5d584e-bf2d-4ebe-975c-cadfca3a2edc",
+      "aws_account_id": "234567890123",
+      "team_name": "DevOps Team",
+      "current_month": "2026-02",
+      "current_cost": 27983.13,
+      "previous_month": "2026-01",
+      "previous_cost": 13575.5,
+      "percentage_change": 106.13,
+      "is_anomaly": true,
+      "detected_at": "2026-02-12T02:00:38.401661+00:00"
+    },
+    {
+      "id": "accd293a-8b42-425b-ad7c-2074a79c647b",
+      "aws_account_id": "345678901234",
+      "team_name": "Data Science",
+      "current_month": "2026-02",
+      "current_cost": 7913.74,
+      "previous_month": "2026-01",
+      "previous_cost": 6275.61,
+      "percentage_change": 26.1,
+      "is_anomaly": true,
+      "detected_at": "2026-02-12T02:00:38.402197+00:00"
+    }
+  ],
+  "last_updated": "2026-02-12T02:00:38.402264+00:00"
+}

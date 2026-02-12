@@ -1,0 +1,25 @@
+{
+  "aws_account_id": "234567890123",
+  "month": "2026-02",
+  "records": [
+    {
+      "id": "54a260b3-b0f0-4a97-a87e-63ef65fd93dd",
+      "aws_account_id": "234567890123",
+      "team_name": "DevOps Team",
+      "month": "2026-02",
+      "total_cost": 27983.13,
+      "service_breakdown": {
+        "EC2": 121.07,
+        "RDS": 7784.78,
+        "S3": 3929.83,
+        "Lambda": 4819.52,
+        "CloudFront": 1501.21,
+        "ECS": 3353.6,
+        "EKS": 751.11,
+        "DynamoDB": 5722.01
+      },
+      "fetched_at": "2026-02-12T02:00:38.401889+00:00"
+    }
+  ],
+  "last_updated": "2026-02-12T02:00:38.401920+00:00"
+}

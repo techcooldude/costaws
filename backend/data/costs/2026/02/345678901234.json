@@ -1,0 +1,25 @@
+{
+  "aws_account_id": "345678901234",
+  "month": "2026-02",
+  "records": [
+    {
+      "id": "69f0bc72-c8d5-420a-ad3b-fae09429656f",
+      "aws_account_id": "345678901234",
+      "team_name": "Data Science",
+      "month": "2026-02",
+      "total_cost": 7913.74,
+      "service_breakdown": {
+        "EC2": 1755.39,
+        "RDS": 579.77,
+        "S3": 714.9,
+        "Lambda": 1755.75,
+        "CloudFront": 98.56,
+        "ECS": 638.62,
+        "EKS": 163.93,
+        "DynamoDB": 2206.83
+      },
+      "fetched_at": "2026-02-12T02:00:38.402602+00:00"
+    }
+  ],
+  "last_updated": "2026-02-12T02:00:38.402648+00:00"
+}
