@@ -3,18 +3,18 @@
 #############################################
 #  AWS Cost AI Agent - Installation Script  #
 #  Version: 3.0.0                           #
-#  Secure Interactive Setup                 #
+#  Direct Python Installation (No Docker)   #
 #############################################
 
 set -e
 
-# Colors for output
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 # Banner
 echo -e "${CYAN}"
@@ -40,29 +40,31 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-# Check Docker
-echo -e "${BLUE}🔍 Checking prerequisites...${NC}"
-if ! command -v docker &> /dev/null; then
-    echo -e "${YELLOW}Docker not found. Installing Docker...${NC}"
-    curl -fsSL https://get.docker.com | sh
-    systemctl start docker
-    systemctl enable docker
+# Check/Install Python 3.11+
+echo -e "${BLUE}🔍 Checking Python...${NC}"
+if command -v python3.11 &> /dev/null; then
+    PYTHON_CMD="python3.11"
+elif command -v python3 &> /dev/null; then
+    PY_VERSION=$(python3 -c 'import sys; print(sys.version_info.minor)')
+    if [ "$PY_VERSION" -ge 10 ]; then
+        PYTHON_CMD="python3"
+    else
+        echo -e "${YELLOW}Installing Python 3.11...${NC}"
+        apt update && apt install -y python3.11 python3.11-venv python3-pip
+        PYTHON_CMD="python3.11"
+    fi
+else
+    echo -e "${YELLOW}Installing Python 3.11...${NC}"
+    apt update && apt install -y python3.11 python3.11-venv python3-pip
+    PYTHON_CMD="python3.11"
 fi
-
-if ! command -v docker-compose &> /dev/null; then
-    echo -e "${YELLOW}Docker Compose not found. Installing...${NC}"
-    curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-    chmod +x /usr/local/bin/docker-compose
-fi
-
-echo -e "${GREEN}✅ Docker and Docker Compose are installed${NC}"
-echo ""
+echo -e "${GREEN}✅ Python ready: $PYTHON_CMD${NC}"
 
 # Create installation directory
-mkdir -p "$INSTALL_DIR/backend"
-mkdir -p "$INSTALL_DIR/data"
+mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
+echo ""
 echo -e "${CYAN}════════════════════════════════════════════════════════════${NC}"
 echo -e "${CYAN}                    🔐 SECURE CONFIGURATION                  ${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════${NC}"
@@ -199,59 +201,69 @@ SCHEDULE_HOUR=${SCHEDULE_HOUR}
 ADMIN_EMAILS=${ADMIN_EMAILS}
 ENVEOF
 
-# Secure the .env file
 chmod 600 .env
 echo -e "${GREEN}✅ .env file created with secure permissions (600)${NC}"
 
-# Create docker-compose.yml
-echo -e "${BLUE}Creating docker-compose.yml...${NC}"
-cat > docker-compose.yml << 'DOCKEREOF'
-version: '3.8'
+# Create virtual environment
+echo -e "${BLUE}Creating Python virtual environment...${NC}"
+$PYTHON_CMD -m venv venv
+source venv/bin/activate
 
-services:
-  cost-agent:
-    image: python:3.11-slim
-    container_name: aws-cost-ai-agent
-    restart: always
-    ports:
-      - "8001:8001"
-    volumes:
-      - ./backend:/app/backend
-      - ./data:/app/backend/data
-    working_dir: /app/backend
-    env_file:
-      - .env
-    command: >
-      bash -c "pip install --quiet --no-cache-dir 
-      fastapi uvicorn python-dotenv pydantic email-validator 
-      apscheduler httpx boto3 
-      emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ 
-      && python -c 'from dotenv import load_dotenv; load_dotenv()' 
-      && uvicorn server:app --host 0.0.0.0 --port 8001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-DOCKEREOF
-echo -e "${GREEN}✅ docker-compose.yml created${NC}"
+# Install dependencies
+echo -e "${BLUE}Installing Python dependencies...${NC}"
+pip install --quiet --upgrade pip
+pip install --quiet \
+    fastapi \
+    uvicorn \
+    python-dotenv \
+    pydantic \
+    email-validator \
+    apscheduler \
+    httpx \
+    boto3 \
+    emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
 
-# Download server.py
-echo -e "${BLUE}Downloading server.py...${NC}"
-if [ -f "backend/server.py" ]; then
-    echo -e "${YELLOW}server.py already exists, skipping download${NC}"
-else
-    # For now, we'll create a placeholder message
-    echo -e "${YELLOW}Please copy server.py to ${INSTALL_DIR}/backend/${NC}"
+echo -e "${GREEN}✅ Dependencies installed${NC}"
+
+# Check if server.py exists
+if [ ! -f "server.py" ]; then
+    echo -e "${YELLOW}⚠️  server.py not found${NC}"
+    echo -e "${YELLOW}Please copy server.py to ${INSTALL_DIR}/${NC}"
 fi
 
+# Create systemd service
+echo -e "${BLUE}Creating systemd service...${NC}"
+cat > /etc/systemd/system/aws-cost-agent.service << SERVICEEOF
+[Unit]
+Description=AWS Cost AI Agent
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=${INSTALL_DIR}
+Environment=PATH=${INSTALL_DIR}/venv/bin
+EnvironmentFile=${INSTALL_DIR}/.env
+ExecStart=${INSTALL_DIR}/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8001
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SERVICEEOF
+
+echo -e "${GREEN}✅ Systemd service created${NC}"
+
 # Create .gitignore
-echo -e "${BLUE}Creating .gitignore...${NC}"
 cat > .gitignore << 'GITIGNOREEOF'
 # Secrets - NEVER COMMIT
 .env
 *.env
-.env.*
+
+# Python
+__pycache__/
+*.pyc
+venv/
 
 # Data
 data/
@@ -259,45 +271,25 @@ data/
 
 # Logs
 *.log
-logs/
-
-# Python
-__pycache__/
-*.pyc
-.venv/
-venv/
-
-# Docker
-docker-compose.override.yml
 GITIGNOREEOF
+
 echo -e "${GREEN}✅ .gitignore created${NC}"
 
-echo ""
-echo -e "${CYAN}════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}                    🚀 STARTING AGENT                        ${NC}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════${NC}"
-echo ""
-
-# Check if server.py exists
-if [ ! -f "backend/server.py" ]; then
-    echo -e "${RED}⚠️  server.py not found in backend/ directory${NC}"
-    echo -e "${YELLOW}Please copy server.py to ${INSTALL_DIR}/backend/ and run:${NC}"
-    echo -e "${GREEN}   cd ${INSTALL_DIR} && docker-compose up -d${NC}"
+# Start service if server.py exists
+if [ -f "server.py" ]; then
     echo ""
-else
-    # Start the container
     echo -e "${BLUE}Starting AWS Cost AI Agent...${NC}"
-    docker-compose up -d
+    systemctl daemon-reload
+    systemctl enable aws-cost-agent
+    systemctl start aws-cost-agent
     
-    # Wait for startup
-    echo -e "${BLUE}Waiting for agent to start...${NC}"
-    sleep 10
+    sleep 3
     
-    # Check health
-    if curl -sf http://localhost:8001/api/health > /dev/null 2>&1; then
+    if systemctl is-active --quiet aws-cost-agent; then
         echo -e "${GREEN}✅ Agent is running!${NC}"
     else
-        echo -e "${YELLOW}⚠️  Agent is starting, please wait a moment...${NC}"
+        echo -e "${YELLOW}⚠️  Agent may still be starting...${NC}"
+        echo -e "${YELLOW}   Check status: systemctl status aws-cost-agent${NC}"
     fi
 fi
 
@@ -308,9 +300,19 @@ echo -e "${CYAN}═════════════════════�
 echo ""
 echo -e "${GREEN}🎉 AWS Cost AI Agent has been installed!${NC}"
 echo ""
-echo -e "${BLUE}📍 Installation Location:${NC} ${INSTALL_DIR}"
-echo -e "${BLUE}🌐 API Endpoint:${NC} http://localhost:8001/api"
-echo -e "${BLUE}📊 Health Check:${NC} http://localhost:8001/api/health"
+echo -e "${BLUE}📍 Location:${NC}      ${INSTALL_DIR}"
+echo -e "${BLUE}🌐 API Endpoint:${NC}  http://localhost:8001/api"
+echo -e "${BLUE}📊 Health Check:${NC}  http://localhost:8001/api/health"
+echo ""
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}                      COMMANDS                              ${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo -e "  ${BLUE}Start:${NC}    sudo systemctl start aws-cost-agent"
+echo -e "  ${BLUE}Stop:${NC}     sudo systemctl stop aws-cost-agent"
+echo -e "  ${BLUE}Restart:${NC}  sudo systemctl restart aws-cost-agent"
+echo -e "  ${BLUE}Status:${NC}   sudo systemctl status aws-cost-agent"
+echo -e "  ${BLUE}Logs:${NC}     sudo journalctl -u aws-cost-agent -f"
 echo ""
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${YELLOW}                      NEXT STEPS                            ${NC}"
@@ -326,18 +328,6 @@ echo '   curl "http://localhost:8001/api/ai/recommendations"'
 echo ""
 echo -e "${GREEN}3. Trigger a test report:${NC}"
 echo '   curl -X POST "http://localhost:8001/api/trigger/weekly-report"'
-echo ""
-echo -e "${GREEN}4. View logs:${NC}"
-echo "   docker-compose logs -f cost-agent"
-echo ""
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${YELLOW}                   USEFUL COMMANDS                          ${NC}"
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-echo -e "  ${BLUE}Start:${NC}   cd ${INSTALL_DIR} && docker-compose up -d"
-echo -e "  ${BLUE}Stop:${NC}    cd ${INSTALL_DIR} && docker-compose down"
-echo -e "  ${BLUE}Logs:${NC}    cd ${INSTALL_DIR} && docker-compose logs -f"
-echo -e "  ${BLUE}Restart:${NC} cd ${INSTALL_DIR} && docker-compose restart"
 echo ""
 echo -e "${CYAN}════════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}           Thank you for using AWS Cost AI Agent! 🤖         ${NC}"
