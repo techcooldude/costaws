@@ -94,6 +94,9 @@ class S3Storage:
     
     def _ensure_bucket_exists(self):
         """Create bucket if it doesn't exist"""
+        if not self.use_s3:
+            return
+            
         try:
             self.s3_client.head_bucket(Bucket=self.bucket_name)
             logger.info(f"S3 bucket '{self.bucket_name}' exists")
@@ -115,54 +118,107 @@ class S3Storage:
             else:
                 logger.warning(f"S3 bucket check failed: {e}")
     
+    def _get_local_path(self, key: str) -> Path:
+        """Get local file path for a key"""
+        return self.local_storage_dir / key
+    
     def _get_object(self, key: str) -> Optional[Dict]:
-        """Get JSON object from S3"""
-        try:
-            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
-            return json.loads(response['Body'].read().decode('utf-8'))
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
+        """Get JSON object from S3 or local storage"""
+        if self.use_s3:
+            try:
+                response = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
+                return json.loads(response['Body'].read().decode('utf-8'))
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchKey':
+                    return None
+                logger.error(f"Error getting {key}: {e}")
                 return None
-            logger.error(f"Error getting {key}: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Error getting {key}: {e}")
+            except Exception as e:
+                logger.error(f"Error getting {key}: {e}")
+                return None
+        else:
+            # Local file storage
+            local_path = self._get_local_path(key)
+            if local_path.exists():
+                try:
+                    with open(local_path, 'r') as f:
+                        return json.load(f)
+                except Exception as e:
+                    logger.error(f"Error reading local file {key}: {e}")
             return None
     
     def _put_object(self, key: str, data: Dict) -> bool:
-        """Put JSON object to S3"""
-        try:
-            self.s3_client.put_object(
-                Bucket=self.bucket_name,
-                Key=key,
-                Body=json.dumps(data, indent=2, default=str),
-                ContentType='application/json'
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Error putting {key}: {e}")
-            return False
+        """Put JSON object to S3 or local storage"""
+        if self.use_s3:
+            try:
+                self.s3_client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=key,
+                    Body=json.dumps(data, indent=2, default=str),
+                    ContentType='application/json'
+                )
+                return True
+            except Exception as e:
+                logger.error(f"Error putting {key}: {e}")
+                return False
+        else:
+            # Local file storage
+            local_path = self._get_local_path(key)
+            try:
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(local_path, 'w') as f:
+                    json.dump(data, f, indent=2, default=str)
+                return True
+            except Exception as e:
+                logger.error(f"Error writing local file {key}: {e}")
+                return False
     
     def _list_objects(self, prefix: str) -> List[str]:
         """List objects with given prefix"""
-        try:
-            response = self.s3_client.list_objects_v2(
-                Bucket=self.bucket_name,
-                Prefix=prefix
-            )
-            return [obj['Key'] for obj in response.get('Contents', [])]
-        except Exception as e:
-            logger.error(f"Error listing {prefix}: {e}")
-            return []
+        if self.use_s3:
+            try:
+                response = self.s3_client.list_objects_v2(
+                    Bucket=self.bucket_name,
+                    Prefix=prefix
+                )
+                return [obj['Key'] for obj in response.get('Contents', [])]
+            except Exception as e:
+                logger.error(f"Error listing {prefix}: {e}")
+                return []
+        else:
+            # Local file storage
+            local_path = self._get_local_path(prefix)
+            if not local_path.exists():
+                return []
+            try:
+                files = []
+                for p in local_path.rglob('*.json'):
+                    rel_path = p.relative_to(self.local_storage_dir)
+                    files.append(str(rel_path))
+                return files
+            except Exception as e:
+                logger.error(f"Error listing local files {prefix}: {e}")
+                return []
     
     def _delete_object(self, key: str) -> bool:
-        """Delete object from S3"""
-        try:
-            self.s3_client.delete_object(Bucket=self.bucket_name, Key=key)
-            return True
-        except Exception as e:
-            logger.error(f"Error deleting {key}: {e}")
-            return False
+        """Delete object from S3 or local storage"""
+        if self.use_s3:
+            try:
+                self.s3_client.delete_object(Bucket=self.bucket_name, Key=key)
+                return True
+            except Exception as e:
+                logger.error(f"Error deleting {key}: {e}")
+                return False
+        else:
+            # Local file storage
+            local_path = self._get_local_path(key)
+            try:
+                if local_path.exists():
+                    local_path.unlink()
+                return True
+            except Exception as e:
+                logger.error(f"Error deleting local file {key}: {e}")
+                return False
     
     # ===== TEAMS =====
     
