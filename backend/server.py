@@ -1780,7 +1780,7 @@ async def startup_event():
     
     auth_status = "DISABLED" if os.environ.get('DISABLE_AUTH', '').lower() == 'true' else "ENABLED"
     logger.info(f"AWS Cost AI Agent v3.1.0 started")
-    logger.info(f"  AI: {'Gemini 3 Flash' if ai_service.api_key else 'Not configured'}")
+    logger.info(f"  AI: {'Gemini 1.5 Flash' if ai_service.api_key else 'Not configured'}")
     logger.info(f"  Storage: {'S3' if storage.use_s3 else 'Local (Demo)'}")
     logger.info(f"  Auth: {auth_status}")
     logger.info(f"  Scheduler: UTC timezone")
