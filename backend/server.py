@@ -101,18 +101,21 @@ async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> bool:
 
 class CostAIService:
     """
-    AI-powered cost analysis using Gemini 3 Flash.
-    Provides:
-    - Anomaly pattern detection
-    - Cost predictions
-    - Optimization recommendations
-    - Natural language summaries
+    AI-powered cost analysis using Google Gemini.
+    Uses google-generativeai library directly.
     """
     
     def __init__(self):
-        self.api_key = os.environ.get('GEMINI_API_KEY', os.environ.get('EMERGENT_LLM_KEY', ''))
-        self.model = "gemini-3-flash-preview"
+        self.api_key = os.environ.get('GEMINI_API_KEY', '')
+        self.model_name = "gemini-1.5-flash"
         self.datadog_base_url = os.environ.get('DATADOG_SITE', 'datadoghq.com')
+        
+        # Configure Gemini
+        if self.api_key:
+            genai.configure(api_key=self.api_key)
+            self.model = genai.GenerativeModel(self.model_name)
+        else:
+            self.model = None
     
     def _get_datadog_links(self, account_id: str) -> Dict[str, str]:
         """Generate Datadog dashboard links for an account"""
@@ -124,25 +127,34 @@ class CostAIService:
             "service_breakdown": f"{base}/cost/analytics?groupBy=service&filter=account_id:{account_id}"
         }
     
+    async def _generate_content(self, prompt: str, system_prompt: str = "") -> str:
+        """Generate content using Gemini"""
+        if not self.model:
+            return ""
+        
+        try:
+            full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+            response = await self.model.generate_content_async(full_prompt)
+            return response.text
+        except Exception as e:
+            logger.error(f"Gemini generation error: {e}")
+            return ""
+    
     async def analyze_cost_anomaly(self, team_data: Dict) -> Dict[str, Any]:
         """
         Analyze WHY costs changed using AI.
         Returns insights about the cost changes.
         """
         if not self.api_key:
-            logger.warning("LLM API key not configured, returning basic analysis")
+            logger.warning("Gemini API key not configured, returning basic analysis")
             return self._basic_analysis(team_data)
         
         try:
-            chat = LlmChat(
-                api_key=self.api_key,
-                session_id=f"cost-analysis-{team_data.get('aws_account_id', 'unknown')}",
-                system_message="""You are an AWS cost optimization expert. Analyze the provided cost data and:
+            system_prompt = """You are an AWS cost optimization expert. Analyze the provided cost data and:
 1. Explain WHY costs changed (be specific about services)
 2. Identify patterns or anomalies
 3. Provide actionable recommendations
 Keep responses concise and actionable. Use bullet points."""
-            ).with_model("gemini", self.model)
             
             prompt = f"""Analyze this AWS cost data for {team_data.get('team_name', 'Unknown Team')}:
 
@@ -161,14 +173,17 @@ Provide:
 2. Top 3 cost drivers
 3. Specific optimization recommendations"""
 
-            response = await chat.send_message(UserMessage(text=prompt))
+            response = await self._generate_content(prompt, system_prompt)
             
-            return {
-                "ai_analysis": response,
-                "analysis_type": "gemini-3-flash",
-                "datadog_links": self._get_datadog_links(team_data.get('aws_account_id', '')),
-                "generated_at": datetime.now(timezone.utc).isoformat()
-            }
+            if response:
+                return {
+                    "ai_analysis": response,
+                    "analysis_type": "gemini-1.5-flash",
+                    "datadog_links": self._get_datadog_links(team_data.get('aws_account_id', '')),
+                    "generated_at": datetime.now(timezone.utc).isoformat()
+                }
+            else:
+                return self._basic_analysis(team_data)
             
         except Exception as e:
             logger.error(f"AI analysis failed: {e}")
@@ -182,12 +197,8 @@ Provide:
             return self._basic_prediction(historical_data)
         
         try:
-            chat = LlmChat(
-                api_key=self.api_key,
-                session_id=f"cost-prediction-{team_name}",
-                system_message="""You are an AWS cost forecasting expert. Based on historical cost data, predict next month's costs.
+            system_prompt = """You are an AWS cost forecasting expert. Based on historical cost data, predict next month's costs.
 Provide a specific dollar amount prediction with confidence level and reasoning."""
-            ).with_model("gemini", self.model)
             
             # Prepare historical summary
             history_summary = "\n".join([
@@ -206,14 +217,17 @@ Provide:
 3. Key factors affecting the prediction
 4. Potential risks that could increase costs"""
 
-            response = await chat.send_message(UserMessage(text=prompt))
+            response = await self._generate_content(prompt, system_prompt)
             
-            return {
-                "prediction": response,
-                "model": "gemini-3-flash",
-                "historical_months_analyzed": len(historical_data),
-                "generated_at": datetime.now(timezone.utc).isoformat()
-            }
+            if response:
+                return {
+                    "prediction": response,
+                    "model": "gemini-1.5-flash",
+                    "historical_months_analyzed": len(historical_data),
+                    "generated_at": datetime.now(timezone.utc).isoformat()
+                }
+            else:
+                return self._basic_prediction(historical_data)
             
         except Exception as e:
             logger.error(f"Cost prediction failed: {e}")
@@ -227,13 +241,9 @@ Provide:
             return {"recommendations": "Configure GEMINI_API_KEY for AI recommendations"}
         
         try:
-            chat = LlmChat(
-                api_key=self.api_key,
-                session_id="org-optimization",
-                system_message="""You are an AWS cost optimization consultant for a large organization.
+            system_prompt = """You are an AWS cost optimization consultant for a large organization.
 Analyze cost data across multiple accounts and provide strategic recommendations.
 Focus on high-impact, actionable items."""
-            ).with_model("gemini", self.model)
             
             # Summarize all teams data
             total_current = sum(t.get('current_month_cost', 0) for t in all_teams_data)
@@ -261,16 +271,19 @@ Provide:
 3. Reserved Instance / Savings Plan recommendations
 4. Quick wins (actions that can save money this week)"""
 
-            response = await chat.send_message(UserMessage(text=prompt))
+            response = await self._generate_content(prompt, system_prompt)
             
-            return {
-                "org_recommendations": response,
-                "accounts_analyzed": len(all_teams_data),
-                "total_spend": total_current,
-                "anomalies_detected": len(top_anomalies),
-                "model": "gemini-3-flash",
-                "generated_at": datetime.now(timezone.utc).isoformat()
-            }
+            if response:
+                return {
+                    "org_recommendations": response,
+                    "accounts_analyzed": len(all_teams_data),
+                    "total_spend": total_current,
+                    "anomalies_detected": len(top_anomalies),
+                    "model": "gemini-1.5-flash",
+                    "generated_at": datetime.now(timezone.utc).isoformat()
+                }
+            else:
+                return {"recommendations": "Failed to generate recommendations"}
             
         except Exception as e:
             logger.error(f"Optimization recommendations failed: {e}")
@@ -284,13 +297,9 @@ Provide:
             return self._basic_executive_summary(all_teams_data, all_anomalies)
         
         try:
-            chat = LlmChat(
-                api_key=self.api_key,
-                session_id="executive-summary",
-                system_message="""You are a CFO's assistant writing cost reports. 
+            system_prompt = """You are a CFO's assistant writing cost reports. 
 Write concise, executive-friendly summaries with clear action items.
 Use professional language suitable for C-level executives."""
-            ).with_model("gemini", self.model)
             
             total_current = sum(t.get('current_month_cost', 0) for t in all_teams_data)
             total_previous = sum(t.get('previous_month_cost', 0) for t in all_teams_data)
@@ -311,8 +320,8 @@ Write a 3-4 sentence executive summary highlighting:
 2. Key concerns
 3. Recommended immediate actions"""
 
-            response = await chat.send_message(UserMessage(text=prompt))
-            return response
+            response = await self._generate_content(prompt, system_prompt)
+            return response if response else self._basic_executive_summary(all_teams_data, all_anomalies)
             
         except Exception as e:
             logger.error(f"Executive summary generation failed: {e}")
