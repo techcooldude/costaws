@@ -1,20 +1,24 @@
 """
-AWS Cost Notification Agent
-===========================
+AWS Cost Notification Agent (S3 Storage Version)
+=================================================
 A backend-only automation system that:
 1. Fetches AWS cost data from Datadog
 2. Compares current vs last month costs
 3. Detects anomalies (configurable threshold)
 4. Sends weekly email reports to teams and admins
 5. Teams get only their data, admins get all data
+
+STORAGE: AWS S3 (no database required)
 """
 
 from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Query
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
+import boto3
+from botocore.exceptions import ClientError
 import os
 import logging
+import json
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from typing import List, Optional, Dict, Any
@@ -30,13 +34,8 @@ import httpx
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
 # Create the main app
-app = FastAPI(title="AWS Cost Notification Agent", version="1.0.0")
+app = FastAPI(title="AWS Cost Notification Agent", version="2.0.0")
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -50,6 +49,261 @@ logger = logging.getLogger(__name__)
 
 # Scheduler for weekly jobs
 scheduler = AsyncIOScheduler()
+
+# ==================== S3 STORAGE SERVICE ====================
+
+class S3Storage:
+    """
+    S3-based storage for all application data.
+    
+    Bucket Structure:
+    ├── config/
+    │   └── notification_config.json
+    ├── teams/
+    │   └── teams.json
+    ├── costs/
+    │   └── {year}/{month}/
+    │       └── {account_id}.json
+    └── anomalies/
+        └── {year}/{month}/
+            └── anomalies.json
+    """
+    
+    def __init__(self):
+        self.bucket_name = os.environ.get('S3_BUCKET_NAME', 'aws-cost-agent-data')
+        self.s3_client = boto3.client(
+            's3',
+            aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY'),
+            region_name=os.environ.get('AWS_REGION', 'us-east-1')
+        )
+        self._ensure_bucket_exists()
+    
+    def _ensure_bucket_exists(self):
+        """Create bucket if it doesn't exist"""
+        try:
+            self.s3_client.head_bucket(Bucket=self.bucket_name)
+            logger.info(f"S3 bucket '{self.bucket_name}' exists")
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code')
+            if error_code == '404':
+                try:
+                    region = os.environ.get('AWS_REGION', 'us-east-1')
+                    if region == 'us-east-1':
+                        self.s3_client.create_bucket(Bucket=self.bucket_name)
+                    else:
+                        self.s3_client.create_bucket(
+                            Bucket=self.bucket_name,
+                            CreateBucketConfiguration={'LocationConstraint': region}
+                        )
+                    logger.info(f"Created S3 bucket '{self.bucket_name}'")
+                except Exception as create_error:
+                    logger.error(f"Failed to create bucket: {create_error}")
+            else:
+                logger.warning(f"S3 bucket check failed: {e}")
+    
+    def _get_object(self, key: str) -> Optional[Dict]:
+        """Get JSON object from S3"""
+        try:
+            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
+            return json.loads(response['Body'].read().decode('utf-8'))
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                return None
+            logger.error(f"Error getting {key}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting {key}: {e}")
+            return None
+    
+    def _put_object(self, key: str, data: Dict) -> bool:
+        """Put JSON object to S3"""
+        try:
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=key,
+                Body=json.dumps(data, indent=2, default=str),
+                ContentType='application/json'
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error putting {key}: {e}")
+            return False
+    
+    def _list_objects(self, prefix: str) -> List[str]:
+        """List objects with given prefix"""
+        try:
+            response = self.s3_client.list_objects_v2(
+                Bucket=self.bucket_name,
+                Prefix=prefix
+            )
+            return [obj['Key'] for obj in response.get('Contents', [])]
+        except Exception as e:
+            logger.error(f"Error listing {prefix}: {e}")
+            return []
+    
+    def _delete_object(self, key: str) -> bool:
+        """Delete object from S3"""
+        try:
+            self.s3_client.delete_object(Bucket=self.bucket_name, Key=key)
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting {key}: {e}")
+            return False
+    
+    # ===== TEAMS =====
+    
+    def get_all_teams(self) -> List[Dict]:
+        """Get all teams"""
+        data = self._get_object('teams/teams.json')
+        return data.get('teams', []) if data else []
+    
+    def save_teams(self, teams: List[Dict]) -> bool:
+        """Save all teams"""
+        return self._put_object('teams/teams.json', {'teams': teams, 'updated_at': datetime.now(timezone.utc).isoformat()})
+    
+    def get_team_by_id(self, team_id: str) -> Optional[Dict]:
+        """Get team by ID"""
+        teams = self.get_all_teams()
+        for team in teams:
+            if team.get('id') == team_id:
+                return team
+        return None
+    
+    def add_team(self, team: Dict) -> bool:
+        """Add a new team"""
+        teams = self.get_all_teams()
+        teams.append(team)
+        return self.save_teams(teams)
+    
+    def delete_team(self, team_id: str) -> bool:
+        """Delete a team"""
+        teams = self.get_all_teams()
+        new_teams = [t for t in teams if t.get('id') != team_id]
+        if len(new_teams) == len(teams):
+            return False  # Team not found
+        return self.save_teams(new_teams)
+    
+    # ===== CONFIG =====
+    
+    def get_config(self) -> Dict:
+        """Get notification configuration"""
+        config = self._get_object('config/notification_config.json')
+        if not config:
+            config = {
+                'id': str(uuid.uuid4()),
+                'anomaly_threshold': 20.0,
+                'schedule_day': 'monday',
+                'schedule_hour': 9,
+                'global_admin_emails': [],
+                'smtp_host': '',
+                'smtp_port': 587,
+                'smtp_user': '',
+                'smtp_password': '',
+                'sender_email': '',
+                'updated_at': datetime.now(timezone.utc).isoformat()
+            }
+            self.save_config(config)
+        return config
+    
+    def save_config(self, config: Dict) -> bool:
+        """Save notification configuration"""
+        config['updated_at'] = datetime.now(timezone.utc).isoformat()
+        return self._put_object('config/notification_config.json', config)
+    
+    # ===== COST HISTORY =====
+    
+    def save_cost_record(self, cost_data: Dict) -> bool:
+        """Save a cost record"""
+        year_month = cost_data.get('month', datetime.now(timezone.utc).strftime('%Y-%m'))
+        year, month = year_month.split('-')
+        account_id = cost_data.get('aws_account_id', 'unknown')
+        
+        key = f"costs/{year}/{month}/{account_id}.json"
+        
+        # Get existing records for this account/month or create new
+        existing = self._get_object(key)
+        if existing:
+            records = existing.get('records', [])
+            records.append(cost_data)
+        else:
+            records = [cost_data]
+        
+        return self._put_object(key, {
+            'aws_account_id': account_id,
+            'month': year_month,
+            'records': records,
+            'last_updated': datetime.now(timezone.utc).isoformat()
+        })
+    
+    def get_cost_history(self, team_name: Optional[str] = None, month: Optional[str] = None, limit: int = 100) -> List[Dict]:
+        """Get cost history records"""
+        all_records = []
+        
+        if month:
+            year, mon = month.split('-')
+            prefix = f"costs/{year}/{mon}/"
+        else:
+            prefix = "costs/"
+        
+        keys = self._list_objects(prefix)
+        
+        for key in keys:
+            if key.endswith('.json'):
+                data = self._get_object(key)
+                if data and 'records' in data:
+                    for record in data['records']:
+                        if team_name and record.get('team_name') != team_name:
+                            continue
+                        all_records.append(record)
+        
+        # Sort by fetched_at descending
+        all_records.sort(key=lambda x: x.get('fetched_at', ''), reverse=True)
+        return all_records[:limit]
+    
+    # ===== ANOMALIES =====
+    
+    def save_anomaly(self, anomaly: Dict) -> bool:
+        """Save an anomaly record"""
+        year_month = anomaly.get('current_month', datetime.now(timezone.utc).strftime('%Y-%m'))
+        year, month = year_month.split('-')
+        
+        key = f"anomalies/{year}/{month}/anomalies.json"
+        
+        existing = self._get_object(key)
+        if existing:
+            anomalies = existing.get('anomalies', [])
+            anomalies.append(anomaly)
+        else:
+            anomalies = [anomaly]
+        
+        return self._put_object(key, {
+            'month': year_month,
+            'anomalies': anomalies,
+            'last_updated': datetime.now(timezone.utc).isoformat()
+        })
+    
+    def get_anomalies(self, team_name: Optional[str] = None, limit: int = 50) -> List[Dict]:
+        """Get anomaly records"""
+        all_anomalies = []
+        
+        keys = self._list_objects("anomalies/")
+        
+        for key in keys:
+            if key.endswith('.json'):
+                data = self._get_object(key)
+                if data and 'anomalies' in data:
+                    for anomaly in data['anomalies']:
+                        if team_name and anomaly.get('team_name') != team_name:
+                            continue
+                        all_anomalies.append(anomaly)
+        
+        # Sort by detected_at descending
+        all_anomalies.sort(key=lambda x: x.get('detected_at', ''), reverse=True)
+        return all_anomalies[:limit]
+
+# Initialize S3 storage
+storage = S3Storage()
 
 # ==================== MODELS ====================
 
@@ -94,9 +348,9 @@ class CostAnomaly(BaseModel):
 class NotificationConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    anomaly_threshold: float = 20.0  # Percentage increase to trigger anomaly
-    schedule_day: str = "monday"  # Day of the week for weekly report
-    schedule_hour: int = 9  # Hour in UTC
+    anomaly_threshold: float = 20.0
+    schedule_day: str = "monday"
+    schedule_hour: int = 9
     global_admin_emails: List[EmailStr] = []
     smtp_host: str = ""
     smtp_port: int = 587
@@ -128,10 +382,7 @@ class DatadogService:
         self.base_url = f"https://api.{self.site}"
     
     async def get_cost_metrics(self, account_id: str, start_date: str, end_date: str) -> Dict[str, Any]:
-        """
-        Fetch AWS cost metrics from Datadog for a specific account
-        Uses Datadog Metrics Query API
-        """
+        """Fetch AWS cost metrics from Datadog for a specific account"""
         if not self.api_key or not self.app_key:
             logger.warning("Datadog credentials not configured, returning mock data")
             return self._generate_mock_data(account_id, start_date, end_date)
@@ -143,7 +394,6 @@ class DatadogService:
                 "Content-Type": "application/json"
             }
             
-            # Query aws.cost.* metrics filtered by account
             query = f"avg:aws.cost.amortized{{account_id:{account_id}}}"
             
             async with httpx.AsyncClient() as client:
@@ -171,7 +421,6 @@ class DatadogService:
         """Generate mock cost data for demonstration"""
         import random
         
-        # Generate realistic mock data
         base_cost = random.uniform(5000, 50000)
         services = ["EC2", "RDS", "S3", "Lambda", "CloudFront", "ECS", "EKS", "DynamoDB"]
         
@@ -267,7 +516,6 @@ class EmailService:
         previous_cost = cost_data.get('previous_month_cost', 0)
         change = ((current_cost - previous_cost) / previous_cost * 100) if previous_cost > 0 else 0
         
-        # Determine change indicator
         if change > 20:
             change_indicator = f'<span style="color: #dc2626; font-weight: bold;">+{change:.1f}% ⚠️ ANOMALY</span>'
         elif change > 0:
@@ -275,7 +523,6 @@ class EmailService:
         else:
             change_indicator = f'<span style="color: #10b981;">{change:.1f}%</span>'
         
-        # Service breakdown table
         services_html = ""
         for service, cost in cost_data.get('service_breakdown', {}).items():
             prev_service_cost = cost_data.get('previous_service_breakdown', {}).get(service, 0)
@@ -356,7 +603,6 @@ class EmailService:
         total_previous = sum(t.get('previous_month_cost', 0) for t in all_teams_data)
         total_change = ((total_current - total_previous) / total_previous * 100) if total_previous > 0 else 0
         
-        # Anomalies table
         anomalies_html = ""
         sorted_anomalies = sorted(all_anomalies, key=lambda x: x.get('percentage_change', 0), reverse=True)[:10]
         for i, anomaly in enumerate(sorted_anomalies, 1):
@@ -369,7 +615,6 @@ class EmailService:
             </tr>
             """
         
-        # All teams summary table
         teams_html = ""
         sorted_teams = sorted(all_teams_data, key=lambda x: x.get('current_month_cost', 0), reverse=True)
         for team_data in sorted_teams:
@@ -475,13 +720,11 @@ class CostAnalyzer:
         """Analyze costs for a single team"""
         account_id = team['aws_account_id']
         
-        # Get date ranges
         now = datetime.now(timezone.utc)
         current_month_start = now.replace(day=1).strftime("%Y-%m-%d")
         previous_month_start = (now.replace(day=1) - timedelta(days=1)).replace(day=1).strftime("%Y-%m-%d")
         previous_month_end = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m-%d")
         
-        # Fetch cost data from Datadog
         current_data = await datadog_service.get_cost_metrics(
             account_id, 
             current_month_start, 
@@ -496,7 +739,6 @@ class CostAnalyzer:
         current_cost = current_data.get('total_cost', 0)
         previous_cost = previous_data.get('total_cost', 0)
         
-        # Calculate percentage change
         if previous_cost > 0:
             percentage_change = ((current_cost - previous_cost) / previous_cost) * 100
         else:
@@ -526,15 +768,10 @@ async def run_weekly_report():
     logger.info("Starting weekly cost report generation...")
     
     try:
-        # Get configuration
-        config_doc = await db.notification_config.find_one({}, {"_id": 0})
-        if not config_doc:
-            config_doc = NotificationConfig().model_dump()
+        config = storage.get_config()
+        threshold = config.get('anomaly_threshold', 20.0)
         
-        threshold = config_doc.get('anomaly_threshold', 20.0)
-        
-        # Get all teams
-        teams = await db.teams.find({}, {"_id": 0}).to_list(1000)
+        teams = storage.get_all_teams()
         if not teams:
             logger.warning("No teams configured, skipping report generation")
             return
@@ -542,16 +779,13 @@ async def run_weekly_report():
         all_teams_data = []
         all_anomalies = []
         
-        # Analyze each team's costs
         for team in teams:
             try:
                 team_analysis = await cost_analyzer.analyze_team_costs(team, threshold)
                 all_teams_data.append(team_analysis)
                 
-                # Send individual team report
-                await email_service.send_team_report(team, team_analysis, [], config_doc)
+                await email_service.send_team_report(team, team_analysis, [], config)
                 
-                # Track anomalies
                 if team_analysis['is_anomaly']:
                     anomaly = CostAnomaly(
                         aws_account_id=team['aws_account_id'],
@@ -563,12 +797,11 @@ async def run_weekly_report():
                         percentage_change=team_analysis['percentage_change'],
                         is_anomaly=True
                     )
-                    all_anomalies.append(anomaly.model_dump())
-                    
-                    # Store anomaly in DB
-                    await db.anomalies.insert_one(anomaly.model_dump())
+                    anomaly_dict = anomaly.model_dump()
+                    anomaly_dict['detected_at'] = anomaly_dict['detected_at'].isoformat()
+                    all_anomalies.append(anomaly_dict)
+                    storage.save_anomaly(anomaly_dict)
                 
-                # Store cost data
                 cost_record = CostData(
                     aws_account_id=team['aws_account_id'],
                     team_name=team['team_name'],
@@ -576,13 +809,14 @@ async def run_weekly_report():
                     total_cost=team_analysis['current_month_cost'],
                     service_breakdown=team_analysis['service_breakdown']
                 )
-                await db.cost_history.insert_one(cost_record.model_dump())
+                cost_dict = cost_record.model_dump()
+                cost_dict['fetched_at'] = cost_dict['fetched_at'].isoformat()
+                storage.save_cost_record(cost_dict)
                 
             except Exception as e:
                 logger.error(f"Error processing team {team.get('team_name', 'unknown')}: {e}")
         
-        # Send admin consolidated report
-        await email_service.send_admin_report(all_teams_data, all_anomalies, config_doc)
+        await email_service.send_admin_report(all_teams_data, all_anomalies, config)
         
         logger.info(f"Weekly report completed. Processed {len(teams)} teams, found {len(all_anomalies)} anomalies")
         
@@ -594,35 +828,35 @@ async def run_weekly_report():
 @api_router.get("/")
 async def root():
     return {
-        "message": "AWS Cost Notification Agent",
-        "version": "1.0.0",
-        "description": "Backend automation for AWS cost monitoring and notifications"
+        "message": "AWS Cost Notification Agent (S3 Storage)",
+        "version": "2.0.0",
+        "storage": "AWS S3",
+        "bucket": storage.bucket_name
     }
 
 @api_router.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat(), "storage": "S3"}
 
 # Team Management
 @api_router.post("/teams", response_model=Team)
 async def create_team(team_input: TeamCreate):
     """Add a new team with AWS account mapping"""
     team = Team(**team_input.model_dump())
-    doc = team.model_dump()
-    doc['created_at'] = doc['created_at'].isoformat()
-    await db.teams.insert_one(doc)
+    team_dict = team.model_dump()
+    team_dict['created_at'] = team_dict['created_at'].isoformat()
+    storage.add_team(team_dict)
     return team
 
-@api_router.get("/teams", response_model=List[Team])
+@api_router.get("/teams")
 async def get_all_teams():
     """Get all configured teams"""
-    teams = await db.teams.find({}, {"_id": 0}).to_list(1000)
-    return teams
+    return storage.get_all_teams()
 
-@api_router.get("/teams/{team_id}", response_model=Team)
+@api_router.get("/teams/{team_id}")
 async def get_team(team_id: str):
     """Get a specific team by ID"""
-    team = await db.teams.find_one({"id": team_id}, {"_id": 0})
+    team = storage.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     return team
@@ -630,8 +864,8 @@ async def get_team(team_id: str):
 @api_router.delete("/teams/{team_id}")
 async def delete_team(team_id: str):
     """Delete a team"""
-    result = await db.teams.delete_one({"id": team_id})
-    if result.deleted_count == 0:
+    success = storage.delete_team(team_id)
+    if not success:
         raise HTTPException(status_code=404, detail="Team not found")
     return {"message": "Team deleted successfully"}
 
@@ -641,9 +875,9 @@ async def bulk_create_teams(teams: List[TeamCreate]):
     created_teams = []
     for team_input in teams:
         team = Team(**team_input.model_dump())
-        doc = team.model_dump()
-        doc['created_at'] = doc['created_at'].isoformat()
-        await db.teams.insert_one(doc)
+        team_dict = team.model_dump()
+        team_dict['created_at'] = team_dict['created_at'].isoformat()
+        storage.add_team(team_dict)
         created_teams.append(team)
     return {"message": f"Created {len(created_teams)} teams", "teams": created_teams}
 
@@ -651,31 +885,18 @@ async def bulk_create_teams(teams: List[TeamCreate]):
 @api_router.get("/config")
 async def get_config():
     """Get notification configuration"""
-    config = await db.notification_config.find_one({}, {"_id": 0})
-    if not config:
-        default_config = NotificationConfig()
-        doc = default_config.model_dump()
-        doc['updated_at'] = doc['updated_at'].isoformat()
-        await db.notification_config.insert_one(doc)
-        return default_config
-    return config
+    return storage.get_config()
 
 @api_router.put("/config")
 async def update_config(config_update: NotificationConfigUpdate):
     """Update notification configuration"""
+    current_config = storage.get_config()
     update_data = {k: v for k, v in config_update.model_dump().items() if v is not None}
-    update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+    current_config.update(update_data)
+    storage.save_config(current_config)
     
-    await db.notification_config.update_one(
-        {},
-        {"$set": update_data},
-        upsert=True
-    )
-    
-    # Reschedule if schedule changed
     if 'schedule_day' in update_data or 'schedule_hour' in update_data:
-        config = await db.notification_config.find_one({}, {"_id": 0})
-        reschedule_weekly_job(config)
+        reschedule_weekly_job(current_config)
     
     return {"message": "Configuration updated successfully"}
 
@@ -687,14 +908,7 @@ async def get_cost_history(
     limit: int = Query(default=100, le=1000)
 ):
     """Get historical cost data"""
-    query = {}
-    if team_name:
-        query['team_name'] = team_name
-    if month:
-        query['month'] = month
-    
-    costs = await db.cost_history.find(query, {"_id": 0}).sort("fetched_at", -1).to_list(limit)
-    return costs
+    return storage.get_cost_history(team_name, month, limit)
 
 @api_router.get("/anomalies")
 async def get_anomalies(
@@ -702,12 +916,7 @@ async def get_anomalies(
     limit: int = Query(default=50, le=500)
 ):
     """Get detected cost anomalies"""
-    query = {}
-    if team_name:
-        query['team_name'] = team_name
-    
-    anomalies = await db.anomalies.find(query, {"_id": 0}).sort("detected_at", -1).to_list(limit)
-    return anomalies
+    return storage.get_anomalies(team_name, limit)
 
 # Manual Triggers
 @api_router.post("/trigger/weekly-report")
@@ -719,18 +928,15 @@ async def trigger_weekly_report(background_tasks: BackgroundTasks):
 @api_router.post("/trigger/team-report/{team_id}")
 async def trigger_team_report(team_id: str, background_tasks: BackgroundTasks):
     """Manually trigger report for a specific team"""
-    team = await db.teams.find_one({"id": team_id}, {"_id": 0})
+    team = storage.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     
     async def generate_single_report():
-        config_doc = await db.notification_config.find_one({}, {"_id": 0})
-        if not config_doc:
-            config_doc = NotificationConfig().model_dump()
-        
-        threshold = config_doc.get('anomaly_threshold', 20.0)
+        config = storage.get_config()
+        threshold = config.get('anomaly_threshold', 20.0)
         team_analysis = await cost_analyzer.analyze_team_costs(team, threshold)
-        await email_service.send_team_report(team, team_analysis, [], config_doc)
+        await email_service.send_team_report(team, team_analysis, [], config)
     
     background_tasks.add_task(generate_single_report)
     return {"message": f"Report triggered for team {team['team_name']}", "status": "processing"}
@@ -738,15 +944,12 @@ async def trigger_team_report(team_id: str, background_tasks: BackgroundTasks):
 @api_router.get("/preview/team-report/{team_id}")
 async def preview_team_report(team_id: str):
     """Preview the team report without sending email"""
-    team = await db.teams.find_one({"id": team_id}, {"_id": 0})
+    team = storage.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     
-    config_doc = await db.notification_config.find_one({}, {"_id": 0})
-    if not config_doc:
-        config_doc = NotificationConfig().model_dump()
-    
-    threshold = config_doc.get('anomaly_threshold', 20.0)
+    config = storage.get_config()
+    threshold = config.get('anomaly_threshold', 20.0)
     team_analysis = await cost_analyzer.analyze_team_costs(team, threshold)
     
     return {
@@ -758,15 +961,12 @@ async def preview_team_report(team_id: str):
 @api_router.get("/preview/admin-report")
 async def preview_admin_report():
     """Preview the admin consolidated report without sending email"""
-    teams = await db.teams.find({}, {"_id": 0}).to_list(1000)
+    teams = storage.get_all_teams()
     if not teams:
         raise HTTPException(status_code=404, detail="No teams configured")
     
-    config_doc = await db.notification_config.find_one({}, {"_id": 0})
-    if not config_doc:
-        config_doc = NotificationConfig().model_dump()
-    
-    threshold = config_doc.get('anomaly_threshold', 20.0)
+    config = storage.get_config()
+    threshold = config.get('anomaly_threshold', 20.0)
     
     all_teams_data = []
     all_anomalies = []
@@ -805,7 +1005,26 @@ async def get_scheduler_status():
     
     return {
         "running": scheduler.running,
-        "jobs": job_info
+        "jobs": job_info,
+        "storage": {
+            "type": "S3",
+            "bucket": storage.bucket_name
+        }
+    }
+
+# S3 Storage Info
+@api_router.get("/storage/info")
+async def get_storage_info():
+    """Get S3 storage information"""
+    return {
+        "type": "AWS S3",
+        "bucket": storage.bucket_name,
+        "structure": {
+            "config/": "Notification configuration",
+            "teams/": "Team mappings",
+            "costs/{year}/{month}/": "Cost history records",
+            "anomalies/{year}/{month}/": "Detected anomalies"
+        }
     }
 
 # Include the router
@@ -824,11 +1043,9 @@ app.add_middleware(
 def reschedule_weekly_job(config: Dict):
     """Reschedule the weekly job based on configuration"""
     try:
-        # Remove existing job if present
         if scheduler.get_job('weekly_cost_report'):
             scheduler.remove_job('weekly_cost_report')
         
-        # Day mapping
         day_map = {
             'monday': 0, 'tuesday': 1, 'wednesday': 2,
             'thursday': 3, 'friday': 4, 'saturday': 5, 'sunday': 6
@@ -853,17 +1070,13 @@ def reschedule_weekly_job(config: Dict):
 @app.on_event("startup")
 async def startup_event():
     """Initialize scheduler on startup"""
-    config = await db.notification_config.find_one({}, {"_id": 0})
-    if not config:
-        config = NotificationConfig().model_dump()
-    
+    config = storage.get_config()
     reschedule_weekly_job(config)
     scheduler.start()
-    logger.info("AWS Cost Notification Agent started")
+    logger.info(f"AWS Cost Notification Agent started (S3 bucket: {storage.bucket_name})")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
     scheduler.shutdown()
-    client.close()
     logger.info("AWS Cost Notification Agent stopped")
