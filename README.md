@@ -6,15 +6,40 @@ An intelligent automation agent that learns your AWS cost patterns, predicts fut
 
 ---
 
+## ⚡ Quick Installation (1 Command)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/your-repo/aws-cost-agent/main/install.sh | sudo bash
+```
+
+**Or download and run:**
+
+```bash
+wget https://raw.githubusercontent.com/your-repo/aws-cost-agent/main/install.sh
+chmod +x install.sh
+sudo ./install.sh
+```
+
+The installer will **securely prompt** you for:
+- 🔑 Gemini API Key
+- 🔑 AWS S3 Credentials
+- 🔑 Datadog API Keys
+- 🔑 SMTP/Email Credentials
+- ⚙️ Notification Settings
+
+**All keys are stored securely with restricted permissions (chmod 600).**
+
+---
+
 ## 🎯 What It Does
 
 | Feature | Description |
 |---------|-------------|
 | **🔍 Anomaly Detection** | AI explains WHY costs changed |
-| **📈 Cost Prediction** | Predicts next month's costs based on trends |
-| **💡 Optimization Tips** | AI-generated recommendations to save money |
-| **📊 Datadog Integration** | Links directly to your Datadog dashboards |
-| **📧 Smart Reports** | AI-powered weekly email reports |
+| **📈 Cost Prediction** | Predicts next month's costs |
+| **💡 Optimization Tips** | AI recommendations to save money |
+| **📊 Datadog Integration** | Direct links to dashboards |
+| **📧 Smart Reports** | AI-powered weekly emails |
 | **🏢 84 Teams Support** | Each team sees only their costs |
 
 ---
@@ -36,141 +61,247 @@ An intelligent automation agent that learns your AWS cost patterns, predicts fut
 │  │  │  • Optimize $   │  │  • Flag anomaly │  │  • Trend learn  │            │ │
 │  │  │  • Exec summary │  │  • Service drill│  │  • Risk assess  │            │ │
 │  │  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘            │ │
-│  │           │                    │                    │                      │ │
 │  │           └────────────────────┼────────────────────┘                      │ │
-│  │                                │                                           │ │
 │  └────────────────────────────────┼───────────────────────────────────────────┘ │
 │                                   │                                              │
 │  ┌────────────────────────────────┼───────────────────────────────────────────┐ │
 │  │                          DATA LAYER                                         │ │
-│  │                                │                                            │ │
 │  │  ┌─────────────────┐  ┌───────┴───────┐  ┌─────────────────┐              │ │
 │  │  │    DATADOG      │  │   SCHEDULER   │  │   EMAIL SENDER  │              │ │
-│  │  │                 │  │               │  │                 │              │ │
 │  │  │  aws.cost.*     │──│  Weekly cron  │──│  Team reports   │              │ │
 │  │  │  84 accounts    │  │  Configurable │  │  Admin summary  │              │ │
-│  │  │  Service data   │  │  Mon-Sun, UTC │  │  AI insights    │              │ │
 │  │  └─────────────────┘  └───────────────┘  └─────────────────┘              │ │
-│  │                                                                            │ │
 │  └────────────────────────────────────────────────────────────────────────────┘ │
 │                                   │                                              │
 │                                   ▼                                              │
 │  ┌────────────────────────────────────────────────────────────────────────────┐ │
 │  │                          AWS S3 STORAGE                                     │ │
-│  │                                                                             │ │
-│  │   📁 config/                    📁 teams/                                  │ │
-│  │   └── notification_config.json  └── teams.json (84 teams)                  │ │
-│  │                                                                             │ │
-│  │   📁 costs/{year}/{month}/      📁 anomalies/{year}/{month}/               │ │
-│  │   └── {account_id}.json         └── anomalies.json                         │ │
-│  │                                                                             │ │
-│  │   📁 ai_insights/{year}/{month}/                                           │ │
-│  │   └── insights.json  ← AI learns from historical data                      │ │
-│  │                                                                             │ │
+│  │   📁 config/    📁 teams/    📁 costs/    📁 anomalies/    📁 ai_insights/ │ │
 │  └────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                  │
 └──────────────────────────────────────────────────────────────────────────────────┘
-                    │                                      │
-                    ▼                                      ▼
-        ┌───────────────────┐                  ┌───────────────────┐
-        │      DATADOG      │                  │   OUTLOOK/SMTP    │
-        │                   │                  │                   │
-        │   Cost metrics    │                  │   📧 Team: Own $  │
-        │   Service data    │                  │   📧 Admin: All $ │
-        │   84 AWS accounts │                  │   🤖 AI insights  │
-        │                   │                  │   📊 DD links     │
-        └───────────────────┘                  └───────────────────┘
 ```
 
 ---
 
-## ⚡ 1-Step Installation
+## 📧 Sample Email Reports
 
-### Prerequisites
-- A Linux server (Ubuntu 22.04 recommended) or Docker
-- Your API keys ready (see below)
+### Team Report Example
 
-### Quick Install Script
-
-**Copy and run this single command:**
-
-```bash
-curl -sSL https://raw.githubusercontent.com/your-repo/aws-cost-agent/main/install.sh | bash
+```
+╔══════════════════════════════════════════════════════════════════╗
+║                                                                  ║
+║     🤖 AI-Powered Cost Report                                   ║
+║     Platform Team - February 2026                                ║
+║                                                                  ║
+╠══════════════════════════════════════════════════════════════════╣
+║                                                                  ║
+║  ┌────────────────────────────────────────────────────────────┐ ║
+║  │  💰 COST SUMMARY                                           │ ║
+║  ├────────────────────────────────────────────────────────────┤ ║
+║  │                                                            │ ║
+║  │  Current Month:     $45,230.00                            │ ║
+║  │  Previous Month:    $38,500.00                            │ ║
+║  │  Change:            +17.5% ⚠️                              │ ║
+║  │                                                            │ ║
+║  └────────────────────────────────────────────────────────────┘ ║
+║                                                                  ║
+║  ┌────────────────────────────────────────────────────────────┐ ║
+║  │  🧠 AI ANALYSIS (Gemini 3 Flash)                          │ ║
+║  ├────────────────────────────────────────────────────────────┤ ║
+║  │                                                            │ ║
+║  │  Root Cause Analysis:                                      │ ║
+║  │  Your costs increased 17.5% primarily due to:              │ ║
+║  │                                                            │ ║
+║  │  • EC2 scaling for product launch (+$4,200)               │ ║
+║  │    - 8 new m5.xlarge instances added Feb 5-7              │ ║
+║  │    - Auto-scaling triggered during traffic spike          │ ║
+║  │                                                            │ ║
+║  │  • RDS storage expansion (+$1,800)                        │ ║
+║  │    - Database grew 40% due to new user signups            │ ║
+║  │    - Automated backups increased retention                │ ║
+║  │                                                            │ ║
+║  │  Positive Note:                                            │ ║
+║  │  • Lambda costs decreased 15% (-$730) after optimization  │ ║
+║  │                                                            │ ║
+║  │  💡 Recommendations:                                       │ ║
+║  │  1. Convert 4 EC2 instances to Reserved (save $800/mo)    │ ║
+║  │  2. Enable RDS storage auto-scaling threshold alerts      │ ║
+║  │  3. Consider Aurora Serverless for variable workloads     │ ║
+║  │                                                            │ ║
+║  └────────────────────────────────────────────────────────────┘ ║
+║                                                                  ║
+║  ┌────────────────────────────────────────────────────────────┐ ║
+║  │  📈 NEXT MONTH PREDICTION                                  │ ║
+║  ├────────────────────────────────────────────────────────────┤ ║
+║  │                                                            │ ║
+║  │  Predicted Cost:    $48,000 - $52,000                     │ ║
+║  │  Confidence:        High (6 months of data)               │ ║
+║  │                                                            │ ║
+║  │  Risk Factors:                                             │ ║
+║  │  • Q1 marketing campaign may increase traffic 20%         │ ║
+║  │  • New feature launch scheduled for Mar 15                │ ║
+║  │                                                            │ ║
+║  └────────────────────────────────────────────────────────────┘ ║
+║                                                                  ║
+║  ┌────────────────────────────────────────────────────────────┐ ║
+║  │  📊 SERVICE BREAKDOWN                                      │ ║
+║  ├────────────────────────────────────────────────────────────┤ ║
+║  │                                                            │ ║
+║  │  Service          Cost          Change                    │ ║
+║  │  ─────────────────────────────────────────                │ ║
+║  │  EC2              $18,500       +29.2% ⚠️                  │ ║
+║  │  RDS              $12,800       +16.4%                     │ ║
+║  │  S3               $5,200        +8.3%                      │ ║
+║  │  Lambda           $4,130        -15.0% ✅                  │ ║
+║  │  CloudFront       $2,400        +5.2%                      │ ║
+║  │  DynamoDB         $1,200        +2.1%                      │ ║
+║  │  Other            $1,000        +4.0%                      │ ║
+║  │                                                            │ ║
+║  └────────────────────────────────────────────────────────────┘ ║
+║                                                                  ║
+║  ┌────────────────────────────────────────────────────────────┐ ║
+║  │  🔗 DATADOG LINKS                                          │ ║
+║  ├────────────────────────────────────────────────────────────┤ ║
+║  │                                                            │ ║
+║  │  • Cost Dashboard:    https://app.datadoghq.com/cost/...  │ ║
+║  │  • Cost Explorer:     https://app.datadoghq.com/cost/...  │ ║
+║  │  • Service Breakdown: https://app.datadoghq.com/cost/...  │ ║
+║  │                                                            │ ║
+║  └────────────────────────────────────────────────────────────┘ ║
+║                                                                  ║
+║  ────────────────────────────────────────────────────────────── ║
+║  Generated by AWS Cost AI Agent • Powered by Gemini 3 Flash     ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
 ```
 
-**Or manually:**
+---
 
-```bash
-# 1. Create directory and download files
-mkdir -p /opt/aws-cost-agent && cd /opt/aws-cost-agent
+### Admin Report Example
 
-# 2. Create docker-compose.yml
-cat > docker-compose.yml << 'DOCKER_EOF'
-version: '3.8'
-services:
-  cost-agent:
-    image: python:3.11-slim
-    container_name: aws-cost-ai-agent
-    restart: always
-    ports:
-      - "8001:8001"
-    volumes:
-      - ./backend:/app/backend
-      - ./data:/app/backend/data
-    working_dir: /app/backend
-    command: >
-      bash -c "pip install -q fastapi uvicorn python-dotenv pydantic email-validator 
-      apscheduler httpx boto3 emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ 
-      && uvicorn server:app --host 0.0.0.0 --port 8001"
-    environment:
-      - S3_BUCKET_NAME=${S3_BUCKET_NAME:-aws-cost-agent-data}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_REGION=${AWS_REGION:-us-east-1}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - DATADOG_API_KEY=${DATADOG_API_KEY}
-      - DATADOG_APP_KEY=${DATADOG_APP_KEY}
-      - DATADOG_SITE=${DATADOG_SITE:-datadoghq.com}
-      - SMTP_HOST=${SMTP_HOST}
-      - SMTP_PORT=${SMTP_PORT:-587}
-      - SMTP_USER=${SMTP_USER}
-      - SMTP_PASSWORD=${SMTP_PASSWORD}
-      - SENDER_EMAIL=${SENDER_EMAIL}
-DOCKER_EOF
-
-# 3. Create .env file (EDIT THIS WITH YOUR KEYS!)
-cat > .env << 'ENV_EOF'
-# === REQUIRED: AI Configuration ===
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# === REQUIRED: AWS S3 Storage ===
-S3_BUCKET_NAME=aws-cost-agent-data
-AWS_ACCESS_KEY_ID=your_aws_access_key
-AWS_SECRET_ACCESS_KEY=your_aws_secret_key
-AWS_REGION=us-east-1
-
-# === REQUIRED: Datadog ===
-DATADOG_API_KEY=your_datadog_api_key
-DATADOG_APP_KEY=your_datadog_app_key
-DATADOG_SITE=datadoghq.com
-
-# === REQUIRED: Email (Outlook) ===
-SMTP_HOST=smtp.office365.com
-SMTP_PORT=587
-SMTP_USER=your-email@company.com
-SMTP_PASSWORD=your_password
-SENDER_EMAIL=your-email@company.com
-ENV_EOF
-
-# 4. Download server.py (or copy from this repo)
-mkdir -p backend
-curl -o backend/server.py https://your-repo-url/server.py
-
-# 5. Start the agent!
-docker-compose up -d
-
-# 6. Verify it's running
-curl http://localhost:8001/api/health
+```
+╔══════════════════════════════════════════════════════════════════════════╗
+║                                                                          ║
+║     🤖 AI-Powered Organization Cost Summary                             ║
+║     All 84 Accounts - February 2026                                      ║
+║                                                                          ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║                                                                          ║
+║  ┌────────────────────────────────────────────────────────────────────┐ ║
+║  │  🧠 EXECUTIVE SUMMARY (AI-Generated)                               │ ║
+║  ├────────────────────────────────────────────────────────────────────┤ ║
+║  │                                                                    │ ║
+║  │  Total AWS spend across 84 accounts reached $1,245,000 this       │ ║
+║  │  month, an increase of 8.2% from January. While overall growth    │ ║
+║  │  aligns with business expansion, 12 accounts showed unusual       │ ║
+║  │  cost patterns requiring immediate attention.                      │ ║
+║  │                                                                    │ ║
+║  │  Key Concerns:                                                     │ ║
+║  │  • DevOps team's 45% spike ($78K → $113K) needs investigation    │ ║
+║  │  • 3 accounts have idle resources costing $15K/month             │ ║
+║  │  • Reserved Instance coverage dropped to 62% (target: 80%)       │ ║
+║  │                                                                    │ ║
+║  │  Immediate Actions Required:                                       │ ║
+║  │  1. Review DevOps EC2 scaling policies                            │ ║
+║  │  2. Clean up 45 unattached EBS volumes ($4,500/mo)               │ ║
+║  │  3. Purchase 15 additional Reserved Instances                     │ ║
+║  │                                                                    │ ║
+║  └────────────────────────────────────────────────────────────────────┘ ║
+║                                                                          ║
+║  ┌──────────────────┬──────────────────┬──────────────────┐            ║
+║  │  TOTAL CURRENT   │  TOTAL PREVIOUS  │  TOTAL CHANGE    │            ║
+║  │                  │                  │                  │            ║
+║  │  $1,245,000      │  $1,150,500      │  +8.2%          │            ║
+║  └──────────────────┴──────────────────┴──────────────────┘            ║
+║                                                                          ║
+║  ┌────────────────────────────────────────────────────────────────────┐ ║
+║  │  ⚠️ TOP COST ANOMALIES (12 detected)                               │ ║
+║  ├────────────────────────────────────────────────────────────────────┤ ║
+║  │                                                                    │ ║
+║  │  #   Team              Current Cost    Change                     │ ║
+║  │  ───────────────────────────────────────────────────              │ ║
+║  │  1   DevOps Team       $113,400        +45.2% ⚠️                   │ ║
+║  │  2   Data Science      $89,200         +38.7% ⚠️                   │ ║
+║  │  3   ML Platform       $67,800         +32.1% ⚠️                   │ ║
+║  │  4   Analytics         $54,300         +28.9% ⚠️                   │ ║
+║  │  5   Mobile Team       $42,100         +25.4% ⚠️                   │ ║
+║  │                                                                    │ ║
+║  └────────────────────────────────────────────────────────────────────┘ ║
+║                                                                          ║
+║  ┌────────────────────────────────────────────────────────────────────┐ ║
+║  │  💡 AI OPTIMIZATION RECOMMENDATIONS                                │ ║
+║  ├────────────────────────────────────────────────────────────────────┤ ║
+║  │                                                                    │ ║
+║  │  🎯 Top 5 Organization-Wide Savings Opportunities:                │ ║
+║  │                                                                    │ ║
+║  │  1. Reserved Instances Strategy                                   │ ║
+║  │     • Current RI coverage: 62%                                    │ ║
+║  │     • Recommended: Purchase 45 additional RIs                     │ ║
+║  │     • Potential savings: $89,000/year                            │ ║
+║  │                                                                    │ ║
+║  │  2. Right-sizing EC2 Instances                                    │ ║
+║  │     • 127 instances identified as over-provisioned               │ ║
+║  │     • Average utilization: 23%                                    │ ║
+║  │     • Potential savings: $34,000/month                           │ ║
+║  │                                                                    │ ║
+║  │  3. S3 Storage Optimization                                       │ ║
+║  │     • 2.4 PB in Standard tier, 800TB rarely accessed             │ ║
+║  │     • Enable Intelligent-Tiering                                  │ ║
+║  │     • Potential savings: $12,000/month                           │ ║
+║  │                                                                    │ ║
+║  │  4. Cleanup Unused Resources                                      │ ║
+║  │     • 45 unattached EBS volumes                                   │ ║
+║  │     • 23 idle Elastic IPs                                         │ ║
+║  │     • 12 unused NAT Gateways                                      │ ║
+║  │     • Potential savings: $8,500/month                            │ ║
+║  │                                                                    │ ║
+║  │  5. Spot Instances for Dev/Test                                   │ ║
+║  │     • 34% of non-prod workloads eligible                         │ ║
+║  │     • Potential savings: $15,000/month                           │ ║
+║  │                                                                    │ ║
+║  │  ────────────────────────────────────────────────────             │ ║
+║  │  📊 Total Potential Monthly Savings: $69,500                      │ ║
+║  │  📊 Total Potential Annual Savings: $834,000 + $89,000 RI        │ ║
+║  │                                                                    │ ║
+║  └────────────────────────────────────────────────────────────────────┘ ║
+║                                                                          ║
+║  ┌────────────────────────────────────────────────────────────────────┐ ║
+║  │  📋 ALL TEAMS COST SUMMARY                                         │ ║
+║  ├────────────────────────────────────────────────────────────────────┤ ║
+║  │                                                                    │ ║
+║  │  Team              Account ID      Current     Change             │ ║
+║  │  ───────────────────────────────────────────────────────          │ ║
+║  │  DevOps Team       234567890123    $113,400    +45.2% ⚠️          │ ║
+║  │  Data Science      345678901234    $89,200     +38.7% ⚠️          │ ║
+║  │  ML Platform       456789012345    $67,800     +32.1% ⚠️          │ ║
+║  │  Platform Team     123456789012    $45,230     +17.5%             │ ║
+║  │  Backend Team      567890123456    $42,100     +12.3%             │ ║
+║  │  Frontend Team     678901234567    $38,900     +8.7%              │ ║
+║  │  QA Team           789012345678    $28,400     +5.2%              │ ║
+║  │  Security Team     890123456789    $25,100     -2.3% ✅            │ ║
+║  │  ...               ...             ...         ...                │ ║
+║  │  (84 teams total)                                                 │ ║
+║  │                                                                    │ ║
+║  └────────────────────────────────────────────────────────────────────┘ ║
+║                                                                          ║
+║  ┌────────────────────────────────────────────────────────────────────┐ ║
+║  │  📈 NEXT MONTH FORECAST                                            │ ║
+║  ├────────────────────────────────────────────────────────────────────┤ ║
+║  │                                                                    │ ║
+║  │  Predicted Total:    $1,280,000 - $1,350,000                      │ ║
+║  │  Confidence:         Medium-High                                   │ ║
+║  │                                                                    │ ║
+║  │  Factors:                                                          │ ║
+║  │  • Q1 traffic increase expected (+5-10%)                          │ ║
+║  │  • New product launch in March                                     │ ║
+║  │  • Potential savings if recommendations implemented               │ ║
+║  │                                                                    │ ║
+║  └────────────────────────────────────────────────────────────────────┘ ║
+║                                                                          ║
+║  ──────────────────────────────────────────────────────────────────────║
+║  Generated by AWS Cost AI Agent • Powered by Gemini 3 Flash             ║
+║                                                                          ║
+╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
 ---
@@ -179,103 +310,10 @@ curl http://localhost:8001/api/health
 
 | Key | Where to Get | Purpose |
 |-----|-------------|---------|
-| **GEMINI_API_KEY** | [Google AI Studio](https://aistudio.google.com/apikey) | AI analysis & predictions |
-| **AWS_ACCESS_KEY_ID** | AWS IAM Console | S3 storage access |
-| **AWS_SECRET_ACCESS_KEY** | AWS IAM Console | S3 storage access |
-| **DATADOG_API_KEY** | Datadog → Org Settings → API Keys | Fetch cost data |
-| **DATADOG_APP_KEY** | Datadog → Org Settings → App Keys | Fetch cost data |
-| **SMTP_USER/PASSWORD** | Your Outlook/O365 account | Send email reports |
-
-### Getting Gemini API Key (Free!)
-
-1. Go to https://aistudio.google.com/apikey
-2. Click "Create API Key"
-3. Copy the key to your `.env` file
-
----
-
-## 📊 AI Features in Detail
-
-### 1. Anomaly Explanation
-The AI analyzes cost changes and explains WHY:
-
-```
-🧠 AI Analysis:
-• EC2 costs increased 45% due to new m5.xlarge instances launched on Feb 5
-• RDS spike caused by automated snapshot retention increase
-• Recommendation: Consider Reserved Instances for stable EC2 workloads
-```
-
-### 2. Cost Prediction
-Based on historical data, predicts next month:
-
-```
-📈 Prediction:
-• Estimated next month cost: $45,000 - $52,000
-• Confidence: High (based on 6 months of data)
-• Risk factors: Potential Q1 traffic surge, new feature launch
-```
-
-### 3. Optimization Recommendations
-Organization-wide savings opportunities:
-
-```
-💡 Recommendations:
-1. Convert 12 EC2 instances to Reserved (save ~$8,000/mo)
-2. Enable S3 Intelligent-Tiering (save ~$2,000/mo)
-3. Right-size 8 over-provisioned RDS instances
-4. Delete 45 unattached EBS volumes ($500/mo)
-```
-
-### 4. Datadog Links
-Every report includes direct links:
-- Cost Dashboard
-- Cost Explorer (filtered by account)
-- Service Breakdown
-- Anomaly Monitors
-
----
-
-## 📧 Email Report Examples
-
-### Team Report
-```
-🤖 AI-Powered Cost Report
-Platform Team - February 2026
-
-Current Month: $45,230
-Previous Month: $38,500
-Change: +17.5%
-
-🧠 AI Analysis:
-Your costs increased primarily due to EC2 scaling for the 
-product launch. Lambda costs decreased 15% after optimization.
-
-📊 Datadog Links: [Dashboard] [Explorer] [Breakdown]
-
-Service Breakdown:
-• EC2: $18,000 (+25%)
-• RDS: $12,500 (+5%)
-• Lambda: $8,200 (-15%)
-...
-```
-
-### Admin Report
-```
-🤖 AI Organization Summary
-All 84 Accounts - February 2026
-
-🧠 Executive Summary (AI):
-Total AWS spend reached $1.2M this month, up 8% from January.
-12 accounts showed unusual cost patterns. Top concern: DevOps
-team's 45% spike requires immediate attention.
-
-⚠️ Top Anomalies: 12 detected
-💡 AI Recommendations:
-1. Implement Reserved Instances (save $80K/year)
-2. Review DevOps account EC2 usage
-...
-```
+| **GEMINI_API_KEY** | [Google AI Studio](https://aistudio.google.com/apikey) | AI analysis (free!) |
+| **AWS_ACCESS_KEY_ID** | AWS IAM Console | S3 storage |
+| **DATADOG_API_KEY** | Datadog → Org Settings | Cost data |
+| **SMTP Credentials** | Your email provider | Send reports |
 
 ---
 
@@ -283,178 +321,81 @@ team's 45% spike requires immediate attention.
 
 ### Health & Status
 ```bash
-GET /api/health          # Health check + AI status
-GET /api/                 # Agent info
-GET /api/scheduler/status # Next run time
+GET /api/health              # Health check
+GET /api/scheduler/status    # Next scheduled run
 ```
 
-### Teams
+### Teams Management
 ```bash
-GET    /api/teams         # List all teams
-POST   /api/teams         # Create team
-POST   /api/teams/bulk    # Bulk create
-DELETE /api/teams/{id}    # Delete team
+POST /api/teams/bulk         # Add multiple teams
+GET  /api/teams              # List all teams
 ```
 
 ### AI Endpoints
 ```bash
-GET  /api/ai/insights                # Historical AI insights
-POST /api/ai/analyze/{team_id}       # Run AI analysis for team
-GET  /api/ai/recommendations         # Org-wide recommendations
+POST /api/ai/analyze/{id}    # AI analysis for team
+GET  /api/ai/recommendations # Org-wide AI recommendations
+GET  /api/ai/insights        # Historical AI insights
 ```
 
 ### Reports
 ```bash
-POST /api/trigger/weekly-report      # Trigger full report
-GET  /api/preview/team-report/{id}   # Preview team email
-GET  /api/preview/admin-report       # Preview admin email
+POST /api/trigger/weekly-report    # Trigger full report now
+GET  /api/preview/team-report/{id} # Preview team email
+GET  /api/preview/admin-report     # Preview admin email
 ```
 
 ---
 
-## 📁 Data Storage Structure
+## 📁 Files
 
 ```
-S3 Bucket: aws-cost-agent-data/
-│
-├── config/
-│   └── notification_config.json     ← Settings
-│
-├── teams/
-│   └── teams.json                   ← 84 team mappings
-│
-├── costs/2026/02/
-│   ├── 123456789012.json           ← Team cost data
-│   ├── 234567890123.json
-│   └── ...
-│
-├── anomalies/2026/02/
-│   └── anomalies.json              ← Detected anomalies
-│
-└── ai_insights/2026/02/
-    └── insights.json               ← AI learns over time
+aws-cost-agent/
+├── install.sh           # 🚀 1-command installer (interactive)
+├── docker-compose.yml   # Docker configuration
+├── .env                 # 🔐 Your API keys (auto-generated, secure)
+├── .gitignore          # Prevents committing secrets
+├── backend/
+│   └── server.py       # Main AI agent code
+└── README.md           # This file
 ```
 
 ---
 
-## 🔧 Configuration
+## 🔒 Security Features
 
-```bash
-# Set anomaly threshold and schedule
-curl -X PUT "http://localhost:8001/api/config" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "anomaly_threshold": 20,
-    "schedule_day": "monday",
-    "schedule_hour": 9,
-    "global_admin_emails": ["admin@company.com"],
-    "ai_enabled": true
-  }'
-```
+- ✅ **Interactive Setup**: Keys entered securely (hidden input)
+- ✅ **Secure Storage**: `.env` file with chmod 600
+- ✅ **Git Protected**: `.gitignore` prevents committing secrets
+- ✅ **No Hardcoded Keys**: All credentials from environment
+- ✅ **Docker Isolated**: Runs in container
 
 ---
 
-## 🚀 Add Your 84 Teams
+## 💰 Cost
 
-```bash
-# Bulk upload teams
-curl -X POST "http://localhost:8001/api/teams/bulk" \
-  -H "Content-Type: application/json" \
-  -d '[
-    {"team_name": "Platform", "aws_account_id": "111111111111", "team_email": "platform@company.com"},
-    {"team_name": "DevOps", "aws_account_id": "222222222222", "team_email": "devops@company.com"},
-    ...
-  ]'
-```
+| Component | Monthly Cost |
+|-----------|-------------|
+| Gemini 3 Flash | ~$1-5 (free tier available) |
+| AWS S3 | ~$0.03 |
+| Server (t3.micro) | ~$8 |
+| **Total** | **~$9-13/month** |
 
----
-
-## 🧪 Test the AI
-
-```bash
-# 1. Add a test team
-curl -X POST "http://localhost:8001/api/teams" \
-  -H "Content-Type: application/json" \
-  -d '{"team_name":"Test Team","aws_account_id":"123456789012","team_email":"test@example.com"}'
-
-# 2. Run AI analysis
-curl "http://localhost:8001/api/ai/analyze/YOUR_TEAM_ID"
-
-# 3. Get organization recommendations
-curl "http://localhost:8001/api/ai/recommendations"
-```
-
----
-
-## 💰 Cost Comparison
-
-| Component | Without AI | With AI |
-|-----------|-----------|---------|
-| S3 Storage | ~$0.03/mo | ~$0.03/mo |
-| Gemini 3 Flash | $0 | ~$1-5/mo |
-| Server (optional) | $6-15/mo | $6-15/mo |
-| **Total** | **~$6-15/mo** | **~$7-20/mo** |
-
-**Potential Savings from AI Recommendations:** $10,000+ / month 💸
+**Potential Savings**: $10,000+ /month from AI recommendations 💸
 
 ---
 
 ## 🆘 Troubleshooting
 
-### AI not working?
 ```bash
-# Check if key is configured
-curl http://localhost:8001/api/health
-# Look for: "ai_configured": true
-```
-
-### No emails sent?
-```bash
-# Check SMTP config
-docker-compose logs cost-agent | grep -i smtp
-```
-
-### View logs
-```bash
+# View logs
 docker-compose logs -f cost-agent
-```
 
----
+# Restart agent
+docker-compose restart cost-agent
 
-## 📄 Files in This Repo
-
-```
-aws-cost-agent/
-├── docker-compose.yml    # 1-command deployment
-├── .env.example          # Template for your keys
-├── backend/
-│   └── server.py         # Main AI agent code
-└── README.md             # This file
-```
-
----
-
-## 🎯 Quick Start Summary
-
-```bash
-# 1. Clone/Download
-git clone https://github.com/your-repo/aws-cost-agent
-cd aws-cost-agent
-
-# 2. Add your keys to .env
-cp .env.example .env
-nano .env  # Add your API keys
-
-# 3. Start
-docker-compose up -d
-
-# 4. Add teams
-curl -X POST "http://localhost:8001/api/teams/bulk" -d @teams.json
-
-# 5. Test AI
-curl "http://localhost:8001/api/ai/recommendations"
-
-# Done! 🎉
+# Check health
+curl http://localhost:8001/api/health
 ```
 
 ---
