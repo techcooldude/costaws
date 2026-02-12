@@ -1493,7 +1493,7 @@ async def root():
     return {
         "message": "AWS Cost AI Agent",
         "version": "3.1.0",
-        "ai_model": "Gemini 3 Flash",
+        "ai_model": "Gemini 1.5 Flash",
         "storage": "AWS S3" if storage.use_s3 else "Local File (Demo)",
         "auth_enabled": os.environ.get('DISABLE_AUTH', '').lower() != 'true',
         "features": ["Cost Analysis", "Anomaly Detection", "AI Predictions", "Optimization Recommendations"]
