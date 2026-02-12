@@ -23,7 +23,23 @@
       "team_email": "datascience@example.com",
       "admin_emails": [],
       "created_at": "2026-02-12T02:00:30.236023+00:00"
+    },
+    {
+      "id": "6e2d9301-e5c7-45f3-a75d-e219a8972b37",
+      "team_name": "Platform Team",
+      "aws_account_id": "123456789012",
+      "team_email": "platform@example.com",
+      "admin_emails": [],
+      "created_at": "2026-02-12T02:12:04.248941+00:00"
+    },
+    {
+      "id": "4ace785e-415e-4aec-b1b8-63368448656e",
+      "team_name": "DevOps Team",
+      "aws_account_id": "234567890123",
+      "team_email": "devops@example.com",
+      "admin_emails": [],
+      "created_at": "2026-02-12T02:12:04.249390+00:00"
     }
   ],
-  "updated_at": "2026-02-12T02:00:30.236083+00:00"
+  "updated_at": "2026-02-12T02:12:04.249458+00:00"
 }
