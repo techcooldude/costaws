@@ -65,7 +65,9 @@ curl -H "X-API-Key: $API_KEY" http://localhost:8001/api/scheduler/status
 ### 1. Trigger Full Weekly Report (All 84 Teams + Admin)
 
 ```bash
-curl -X POST http://localhost:8001/api/trigger/weekly-report
+API_KEY=$(grep AGENT_API_KEY /opt/aws-cost-agent/.env | cut -d '=' -f2)
+curl -X POST http://localhost:8001/api/trigger/weekly-report \
+  -H "X-API-Key: $API_KEY"
 ```
 
 **What happens:**
@@ -79,16 +81,14 @@ curl -X POST http://localhost:8001/api/trigger/weekly-report
 ### 2. Trigger Report for Single Team
 
 ```bash
+API_KEY=$(grep AGENT_API_KEY /opt/aws-cost-agent/.env | cut -d '=' -f2)
+
 # First, get team ID
-curl http://localhost:8001/api/teams
+curl -H "X-API-Key: $API_KEY" http://localhost:8001/api/teams
 
 # Then trigger for specific team
-curl -X POST http://localhost:8001/api/trigger/team-report/{team_id}
-```
-
-**Example:**
-```bash
-curl -X POST http://localhost:8001/api/trigger/team-report/abc123-def456-789
+curl -X POST http://localhost:8001/api/trigger/team-report/{team_id} \
+  -H "X-API-Key: $API_KEY"
 ```
 
 ---
@@ -97,12 +97,12 @@ curl -X POST http://localhost:8001/api/trigger/team-report/abc123-def456-789
 
 **Preview Team Report:**
 ```bash
-curl http://localhost:8001/api/preview/team-report/{team_id}
+curl -H "X-API-Key: $API_KEY" http://localhost:8001/api/preview/team-report/{team_id}
 ```
 
 **Preview Admin Report:**
 ```bash
-curl http://localhost:8001/api/preview/admin-report
+curl -H "X-API-Key: $API_KEY" http://localhost:8001/api/preview/admin-report
 ```
 
 **Why use preview?**
