@@ -1,23 +1,26 @@
 """
 AWS Cost Notification Agent with AI/LLM (S3 Storage Version)
 ============================================================
-An intelligent backend automation system that:
-1. Fetches AWS cost data from Datadog
-2. Uses Gemini 3 Flash to analyze patterns and predict costs
-3. Detects anomalies and explains WHY they happened
-4. Provides optimization recommendations
-5. Sends weekly email reports with AI insights
-6. Teams get only their data, admins get all data
+Version: 3.1.0 - Production Ready
+
+Fixes in this version:
+1. Datadog Cloud Cost Management API (correct endpoint)
+2. Epoch timestamps for Datadog queries
+3. Explicit UTC timezone in scheduler
+4. API authentication with API key
+5. Secrets from env vars only (not stored in JSON)
+6. IAM role detection with fallback to access keys
 
 STORAGE: AWS S3 (no database required)
 AI: Gemini 3 Flash for intelligent analysis
 """
 
-from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Query
+from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Query, Depends, Security
+from fastapi.security import APIKeyHeader
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, NoCredentialsError
 import os
 import logging
 import json
@@ -32,6 +35,8 @@ from email.mime.multipart import MIMEMultipart
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import httpx
+import hashlib
+import secrets
 
 # Load environment variables FIRST
 ROOT_DIR = Path(__file__).parent
@@ -41,7 +46,7 @@ load_dotenv(ROOT_DIR / '.env')
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 # Create the main app
-app = FastAPI(title="AWS Cost AI Agent", version="3.0.0")
+app = FastAPI(title="AWS Cost AI Agent", version="3.1.0")
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -53,8 +58,44 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Scheduler for weekly jobs
-scheduler = AsyncIOScheduler()
+# Scheduler for weekly jobs with explicit UTC timezone
+scheduler = AsyncIOScheduler(timezone='UTC')
+
+# ==================== API AUTHENTICATION ====================
+
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+def get_api_key() -> str:
+    """Get or generate API key from environment"""
+    api_key = os.environ.get('AGENT_API_KEY', '')
+    if not api_key:
+        # Generate a default key if not set (for initial setup)
+        api_key = secrets.token_urlsafe(32)
+        logger.warning(f"No AGENT_API_KEY set. Generated temporary key: {api_key[:8]}...")
+        logger.warning("Set AGENT_API_KEY in .env for production use")
+    return api_key
+
+AGENT_API_KEY = get_api_key()
+
+async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> bool:
+    """Verify API key for protected endpoints"""
+    # Allow if auth is disabled (for local testing)
+    if os.environ.get('DISABLE_AUTH', '').lower() == 'true':
+        return True
+    
+    if not api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing API key. Include 'X-API-Key' header."
+        )
+    
+    if not secrets.compare_digest(api_key, AGENT_API_KEY):
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid API key"
+        )
+    
+    return True
 
 # ==================== AI/LLM SERVICE ====================
 
@@ -340,36 +381,75 @@ ai_service = CostAIService()
 class S3Storage:
     """
     S3-based storage for all application data.
-    Falls back to local file storage if S3 credentials not configured.
+    - Tries IAM role first (EC2/ECS)
+    - Falls back to access keys from env
+    - Falls back to local file storage if no AWS credentials
     """
     
     def __init__(self):
         self.bucket_name = os.environ.get('S3_BUCKET_NAME', 'aws-cost-agent-data')
-        self.aws_key = os.environ.get('AWS_ACCESS_KEY_ID', '')
-        self.aws_secret = os.environ.get('AWS_SECRET_ACCESS_KEY', '')
-        self.use_s3 = bool(self.aws_key and self.aws_secret)
-        
         self.local_storage_dir = Path('/app/backend/data')
+        self.use_s3 = False
+        self.s3_client = None
         
-        if self.use_s3:
-            self.s3_client = boto3.client(
-                's3',
-                aws_access_key_id=self.aws_key,
-                aws_secret_access_key=self.aws_secret,
-                region_name=os.environ.get('AWS_REGION', 'us-east-1')
-            )
-            self._ensure_bucket_exists()
-        else:
-            logger.warning("S3 credentials not configured - using local file storage")
-            self.local_storage_dir.mkdir(parents=True, exist_ok=True)
-            self.s3_client = None
+        # Try to initialize S3 client
+        self._init_s3_client()
     
-    def _ensure_bucket_exists(self):
-        if not self.use_s3:
-            return
+    def _init_s3_client(self):
+        """Initialize S3 client with IAM role or access keys"""
+        try:
+            # First try: IAM role (no explicit credentials)
+            session = boto3.Session()
+            credentials = session.get_credentials()
+            
+            if credentials:
+                # Check if we have IAM role credentials
+                if hasattr(credentials, 'method') and credentials.method == 'iam-role':
+                    logger.info("Using IAM role for S3 access (recommended)")
+                    self.s3_client = boto3.client('s3', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
+                    self._verify_bucket_access()
+                    return
+            
+            # Second try: Explicit access keys from environment
+            aws_key = os.environ.get('AWS_ACCESS_KEY_ID', '')
+            aws_secret = os.environ.get('AWS_SECRET_ACCESS_KEY', '')
+            
+            if aws_key and aws_secret:
+                logger.info("Using access keys for S3 (consider IAM roles for production)")
+                self.s3_client = boto3.client(
+                    's3',
+                    aws_access_key_id=aws_key,
+                    aws_secret_access_key=aws_secret,
+                    region_name=os.environ.get('AWS_REGION', 'us-east-1')
+                )
+                self._verify_bucket_access()
+                return
+            
+            # Third try: Default credential chain (profile, env, etc.)
+            try:
+                self.s3_client = boto3.client('s3', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
+                self._verify_bucket_access()
+                return
+            except Exception:
+                pass
+            
+            # No credentials available
+            logger.warning("No AWS credentials found - using local file storage (demo mode)")
+            self._setup_local_storage()
+            
+        except NoCredentialsError:
+            logger.warning("No AWS credentials found - using local file storage")
+            self._setup_local_storage()
+        except Exception as e:
+            logger.warning(f"S3 initialization failed: {e} - using local file storage")
+            self._setup_local_storage()
+    
+    def _verify_bucket_access(self):
+        """Verify we can access/create the S3 bucket"""
         try:
             self.s3_client.head_bucket(Bucket=self.bucket_name)
-            logger.info(f"S3 bucket '{self.bucket_name}' exists")
+            self.use_s3 = True
+            logger.info(f"S3 bucket '{self.bucket_name}' accessible")
         except ClientError as e:
             error_code = e.response.get('Error', {}).get('Code')
             if error_code == '404':
@@ -382,9 +462,24 @@ class S3Storage:
                             Bucket=self.bucket_name,
                             CreateBucketConfiguration={'LocationConstraint': region}
                         )
+                    self.use_s3 = True
                     logger.info(f"Created S3 bucket '{self.bucket_name}'")
                 except Exception as create_error:
                     logger.error(f"Failed to create bucket: {create_error}")
+                    self._setup_local_storage()
+            elif error_code == '403':
+                logger.error(f"Access denied to bucket '{self.bucket_name}' - check IAM permissions")
+                self._setup_local_storage()
+            else:
+                logger.error(f"Bucket access error: {e}")
+                self._setup_local_storage()
+    
+    def _setup_local_storage(self):
+        """Set up local file storage as fallback"""
+        self.use_s3 = False
+        self.s3_client = None
+        self.local_storage_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Using local storage at {self.local_storage_dir}")
     
     def _get_local_path(self, key: str) -> Path:
         return self.local_storage_dir / key
@@ -500,21 +595,16 @@ class S3Storage:
             return False
         return self.save_teams(new_teams)
     
-    # Config methods
+    # Config methods - NO SECRETS STORED IN JSON
     def get_config(self) -> Dict:
         config = self._get_object('config/notification_config.json')
         if not config:
             config = {
                 'id': str(uuid.uuid4()),
-                'anomaly_threshold': 20.0,
-                'schedule_day': 'monday',
-                'schedule_hour': 9,
-                'global_admin_emails': [],
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'sender_email': '',
+                'anomaly_threshold': float(os.environ.get('ANOMALY_THRESHOLD', 20.0)),
+                'schedule_day': os.environ.get('SCHEDULE_DAY', 'monday'),
+                'schedule_hour': int(os.environ.get('SCHEDULE_HOUR', 9)),
+                'global_admin_emails': [e.strip() for e in os.environ.get('ADMIN_EMAILS', '').split(',') if e.strip()],
                 'ai_enabled': True,
                 'updated_at': datetime.now(timezone.utc).isoformat()
             }
@@ -522,8 +612,11 @@ class S3Storage:
         return config
     
     def save_config(self, config: Dict) -> bool:
-        config['updated_at'] = datetime.now(timezone.utc).isoformat()
-        return self._put_object('config/notification_config.json', config)
+        # Remove any secrets before saving to JSON
+        safe_config = {k: v for k, v in config.items() 
+                       if k not in ['smtp_password', 'smtp_host', 'smtp_port', 'smtp_user', 'sender_email']}
+        safe_config['updated_at'] = datetime.now(timezone.utc).isoformat()
+        return self._put_object('config/notification_config.json', safe_config)
     
     # Cost history methods
     def save_cost_record(self, cost_data: Dict) -> bool:
@@ -700,17 +793,18 @@ class NotificationConfigUpdate(BaseModel):
     schedule_day: Optional[str] = None
     schedule_hour: Optional[int] = None
     global_admin_emails: Optional[List[EmailStr]] = None
-    smtp_host: Optional[str] = None
-    smtp_port: Optional[int] = None
-    smtp_user: Optional[str] = None
-    smtp_password: Optional[str] = None
-    sender_email: Optional[str] = None
     ai_enabled: Optional[bool] = None
 
 # ==================== DATADOG SERVICE ====================
 
 class DatadogService:
-    """Service to fetch AWS cost data from Datadog"""
+    """
+    Service to fetch AWS cost data from Datadog.
+    
+    Uses Cloud Cost Management API for accurate cost data:
+    - GET /api/v2/cost_by_org for organization-level costs
+    - Uses epoch timestamps (seconds) as required by API
+    """
     
     def __init__(self):
         self.api_key = os.environ.get('DATADOG_API_KEY', '')
@@ -718,39 +812,202 @@ class DatadogService:
         self.site = os.environ.get('DATADOG_SITE', 'datadoghq.com')
         self.base_url = f"https://api.{self.site}"
     
+    def _to_epoch(self, dt: datetime) -> int:
+        """Convert datetime to epoch seconds"""
+        return int(dt.timestamp())
+    
+    def _get_month_range(self, year: int, month: int) -> tuple:
+        """Get start and end epoch for a month"""
+        start = datetime(year, month, 1, tzinfo=timezone.utc)
+        if month == 12:
+            end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        else:
+            end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+        return self._to_epoch(start), self._to_epoch(end)
+    
     async def get_cost_metrics(self, account_id: str, start_date: str, end_date: str) -> Dict[str, Any]:
+        """
+        Fetch cost data from Datadog Cloud Cost Management API.
+        
+        Args:
+            account_id: AWS account ID
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+        
+        Returns:
+            Cost data with total and service breakdown
+        """
         if not self.api_key or not self.app_key:
             logger.warning("Datadog credentials not configured, returning mock data")
             return self._generate_mock_data(account_id, start_date, end_date)
         
         try:
+            # Convert dates to epoch seconds
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            start_epoch = self._to_epoch(start_dt)
+            end_epoch = self._to_epoch(end_dt)
+            
             headers = {
                 "DD-API-KEY": self.api_key,
                 "DD-APPLICATION-KEY": self.app_key,
                 "Content-Type": "application/json"
             }
             
-            query = f"avg:aws.cost.amortized{{account_id:{account_id}}}"
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self.base_url}/api/v1/query",
-                    headers=headers,
-                    params={"from": start_date, "to": end_date, "query": query}
-                )
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                # Try Cloud Cost Management API first (v2)
+                cost_data = await self._fetch_cloud_cost(client, headers, account_id, start_epoch, end_epoch)
                 
-                if response.status_code == 200:
-                    return response.json()
-                else:
-                    logger.error(f"Datadog API error: {response.status_code}")
-                    return self._generate_mock_data(account_id, start_date, end_date)
+                if cost_data:
+                    return cost_data
+                
+                # Fallback to metrics API with epoch timestamps
+                return await self._fetch_metrics_cost(client, headers, account_id, start_epoch, end_epoch)
                     
         except Exception as e:
             logger.error(f"Error fetching from Datadog: {e}")
             return self._generate_mock_data(account_id, start_date, end_date)
     
+    async def _fetch_cloud_cost(self, client: httpx.AsyncClient, headers: Dict, 
+                                 account_id: str, start_epoch: int, end_epoch: int) -> Optional[Dict]:
+        """
+        Fetch from Cloud Cost Management API (v2).
+        This is the correct API for AWS cost data.
+        """
+        try:
+            # Cloud Cost Management endpoint
+            url = f"{self.base_url}/api/v2/cost_by_org"
+            
+            params = {
+                "start_month": datetime.fromtimestamp(start_epoch, tz=timezone.utc).strftime("%Y-%m"),
+                "end_month": datetime.fromtimestamp(end_epoch, tz=timezone.utc).strftime("%Y-%m"),
+                "view": "sub_org"  # Get breakdown by org/account
+            }
+            
+            response = await client.get(url, headers=headers, params=params)
+            
+            if response.status_code == 200:
+                data = response.json()
+                return self._parse_cloud_cost_response(data, account_id)
+            elif response.status_code == 403:
+                logger.warning("Cloud Cost Management API not available (check Datadog plan)")
+                return None
+            else:
+                logger.warning(f"Cloud Cost API returned {response.status_code}")
+                return None
+                
+        except Exception as e:
+            logger.warning(f"Cloud Cost API error: {e}")
+            return None
+    
+    async def _fetch_metrics_cost(self, client: httpx.AsyncClient, headers: Dict,
+                                   account_id: str, start_epoch: int, end_epoch: int) -> Dict:
+        """
+        Fallback to metrics API with correct epoch timestamps.
+        Note: This may not give accurate cost data - Cloud Cost API is preferred.
+        """
+        try:
+            # Use timeseries query with epoch seconds
+            query = f"sum:aws.cost.amortized{{account_id:{account_id}}}.as_count()"
+            
+            params = {
+                "from": start_epoch,
+                "to": end_epoch,
+                "query": query
+            }
+            
+            response = await client.get(
+                f"{self.base_url}/api/v1/query",
+                headers=headers,
+                params=params
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return self._parse_metrics_response(data, account_id)
+            else:
+                logger.warning(f"Metrics API returned {response.status_code}: {response.text[:200]}")
+                return self._generate_mock_data(account_id, 
+                    datetime.fromtimestamp(start_epoch, tz=timezone.utc).strftime("%Y-%m-%d"),
+                    datetime.fromtimestamp(end_epoch, tz=timezone.utc).strftime("%Y-%m-%d"))
+                
+        except Exception as e:
+            logger.error(f"Metrics API error: {e}")
+            return self._generate_mock_data(account_id, "", "")
+    
+    def _parse_cloud_cost_response(self, data: Dict, account_id: str) -> Dict:
+        """Parse Cloud Cost Management API response"""
+        try:
+            total_cost = 0
+            service_breakdown = {}
+            
+            # Extract cost data from response
+            for org_data in data.get('data', []):
+                attributes = org_data.get('attributes', {})
+                
+                # Check if this is our account
+                org_name = attributes.get('org_name', '')
+                if account_id in org_name or not account_id:
+                    charges = attributes.get('charges', [])
+                    for charge in charges:
+                        charge_type = charge.get('charge_type', 'Other')
+                        cost = charge.get('cost', 0)
+                        total_cost += cost
+                        service_breakdown[charge_type] = service_breakdown.get(charge_type, 0) + cost
+            
+            if total_cost > 0:
+                return {
+                    "account_id": account_id,
+                    "total_cost": round(total_cost, 2),
+                    "service_breakdown": {k: round(v, 2) for k, v in service_breakdown.items()},
+                    "source": "datadog_cloud_cost",
+                    "is_mock": False
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error parsing cloud cost response: {e}")
+            return None
+    
+    def _parse_metrics_response(self, data: Dict, account_id: str) -> Dict:
+        """Parse metrics API response"""
+        try:
+            series = data.get('series', [])
+            if not series:
+                return self._generate_mock_data(account_id, "", "")
+            
+            # Sum up all data points
+            total_cost = 0
+            for s in series:
+                pointlist = s.get('pointlist', [])
+                for point in pointlist:
+                    if len(point) >= 2 and point[1] is not None:
+                        total_cost += point[1]
+            
+            if total_cost > 0:
+                return {
+                    "account_id": account_id,
+                    "total_cost": round(total_cost, 2),
+                    "service_breakdown": {"Total": round(total_cost, 2)},
+                    "source": "datadog_metrics",
+                    "is_mock": False
+                }
+            
+            return self._generate_mock_data(account_id, "", "")
+            
+        except Exception as e:
+            logger.error(f"Error parsing metrics response: {e}")
+            return self._generate_mock_data(account_id, "", "")
+    
     def _generate_mock_data(self, account_id: str, start_date: str, end_date: str) -> Dict[str, Any]:
+        """Generate mock data for testing when Datadog is not configured"""
         import random
+        
+        # Use account_id as seed for consistent mock data
+        seed = int(hashlib.md5(account_id.encode()).hexdigest()[:8], 16)
+        random.seed(seed)
+        
         base_cost = random.uniform(5000, 50000)
         services = ["EC2", "RDS", "S3", "Lambda", "CloudFront", "ECS", "EKS", "DynamoDB"]
         
@@ -762,13 +1019,15 @@ class DatadogService:
             cost = random.uniform(0, remaining * 0.4)
             service_breakdown[service] = round(cost, 2)
             remaining -= cost
-        service_breakdown[services[-1]] = round(remaining, 2)
+        service_breakdown[services[-1]] = round(max(remaining, 0), 2)
         
         return {
             "account_id": account_id,
             "total_cost": round(base_cost, 2),
             "service_breakdown": service_breakdown,
-            "is_mock": True
+            "source": "mock_data",
+            "is_mock": True,
+            "note": "Configure DATADOG_API_KEY and DATADOG_APP_KEY for real data"
         }
 
 datadog_service = DatadogService()
@@ -776,7 +1035,20 @@ datadog_service = DatadogService()
 # ==================== EMAIL SERVICE ====================
 
 class EmailService:
-    """Service to send email notifications with AI insights"""
+    """
+    Service to send email notifications with AI insights.
+    All SMTP credentials are read from environment variables only.
+    """
+    
+    def _get_smtp_config(self) -> Dict:
+        """Get SMTP config from environment only - never from stored config"""
+        return {
+            'smtp_host': os.environ.get('SMTP_HOST', ''),
+            'smtp_port': int(os.environ.get('SMTP_PORT', 587)),
+            'smtp_user': os.environ.get('SMTP_USER', ''),
+            'smtp_password': os.environ.get('SMTP_PASSWORD', ''),
+            'sender_email': os.environ.get('SENDER_EMAIL', os.environ.get('SMTP_USER', ''))
+        }
     
     async def send_team_report(self, team: Dict, cost_data: Dict, ai_analysis: Dict, config: Dict):
         try:
@@ -786,8 +1058,7 @@ class EmailService:
             await self._send_email(
                 to_emails=[team['team_email']],
                 subject=subject,
-                html_content=html_content,
-                config=config
+                html_content=html_content
             )
             logger.info(f"Team report sent to {team['team_email']}")
         except Exception as e:
@@ -804,22 +1075,24 @@ class EmailService:
                 await self._send_email(
                     to_emails=admin_emails,
                     subject=subject,
-                    html_content=html_content,
-                    config=config
+                    html_content=html_content
                 )
                 logger.info(f"Admin report sent to {len(admin_emails)} admins")
         except Exception as e:
             logger.error(f"Failed to send admin report: {e}")
     
-    async def _send_email(self, to_emails: List[str], subject: str, html_content: str, config: Dict):
-        smtp_host = config.get('smtp_host') or os.environ.get('SMTP_HOST', '')
-        smtp_port = config.get('smtp_port') or int(os.environ.get('SMTP_PORT', 587))
-        smtp_user = config.get('smtp_user') or os.environ.get('SMTP_USER', '')
-        smtp_password = config.get('smtp_password') or os.environ.get('SMTP_PASSWORD', '')
-        sender_email = config.get('sender_email') or os.environ.get('SENDER_EMAIL', '')
+    async def _send_email(self, to_emails: List[str], subject: str, html_content: str):
+        """Send email using SMTP credentials from environment"""
+        smtp_config = self._get_smtp_config()
+        
+        smtp_host = smtp_config['smtp_host']
+        smtp_port = smtp_config['smtp_port']
+        smtp_user = smtp_config['smtp_user']
+        smtp_password = smtp_config['smtp_password']
+        sender_email = smtp_config['sender_email']
         
         if not all([smtp_host, smtp_user, smtp_password, sender_email]):
-            logger.warning("SMTP not configured, logging email content instead")
+            logger.warning("SMTP not configured in environment, logging email instead")
             logger.info(f"Would send to: {to_emails}")
             logger.info(f"Subject: {subject}")
             return
@@ -1052,7 +1325,7 @@ class EmailService:
                     </table>
                     
                     <p style="margin-top: 20px; font-size: 12px; color: #9ca3af;">
-                        Generated by AWS Cost AI Agent • Powered by Gemini 3 Flash
+                        Generated by AWS Cost AI Agent v3.1.0 • Powered by Gemini 3 Flash
                     </p>
                 </div>
             </div>
@@ -1098,7 +1371,8 @@ class CostAnalyzer:
             'service_breakdown': current_data.get('service_breakdown', {}),
             'previous_service_breakdown': previous_data.get('service_breakdown', {}),
             'current_month': now.strftime("%Y-%m"),
-            'previous_month': (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+            'previous_month': (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m"),
+            'data_source': current_data.get('source', 'unknown')
         }
 
 cost_analyzer = CostAnalyzer()
@@ -1204,13 +1478,15 @@ async def run_weekly_report():
 
 # ==================== API ROUTES ====================
 
+# PUBLIC ENDPOINTS (no auth required)
 @api_router.get("/")
 async def root():
     return {
         "message": "AWS Cost AI Agent",
-        "version": "3.0.0",
+        "version": "3.1.0",
         "ai_model": "Gemini 3 Flash",
         "storage": "AWS S3" if storage.use_s3 else "Local File (Demo)",
+        "auth_enabled": os.environ.get('DISABLE_AUTH', '').lower() != 'true',
         "features": ["Cost Analysis", "Anomaly Detection", "AI Predictions", "Optimization Recommendations"]
     }
 
@@ -1220,12 +1496,16 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "storage": "S3" if storage.use_s3 else "Local",
-        "ai_configured": bool(ai_service.api_key)
+        "ai_configured": bool(ai_service.api_key),
+        "datadog_configured": bool(datadog_service.api_key and datadog_service.app_key),
+        "smtp_configured": bool(os.environ.get('SMTP_HOST'))
     }
+
+# PROTECTED ENDPOINTS (require API key)
 
 # Team Management
 @api_router.post("/teams")
-async def create_team(team_input: TeamCreate):
+async def create_team(team_input: TeamCreate, _: bool = Depends(verify_api_key)):
     team = Team(**team_input.model_dump())
     team_dict = team.model_dump()
     team_dict['created_at'] = team_dict['created_at'].isoformat()
@@ -1233,25 +1513,25 @@ async def create_team(team_input: TeamCreate):
     return team
 
 @api_router.get("/teams")
-async def get_all_teams():
+async def get_all_teams(_: bool = Depends(verify_api_key)):
     return storage.get_all_teams()
 
 @api_router.get("/teams/{team_id}")
-async def get_team(team_id: str):
+async def get_team(team_id: str, _: bool = Depends(verify_api_key)):
     team = storage.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     return team
 
 @api_router.delete("/teams/{team_id}")
-async def delete_team(team_id: str):
+async def delete_team(team_id: str, _: bool = Depends(verify_api_key)):
     success = storage.delete_team(team_id)
     if not success:
         raise HTTPException(status_code=404, detail="Team not found")
     return {"message": "Team deleted successfully"}
 
 @api_router.post("/teams/bulk")
-async def bulk_create_teams(teams: List[TeamCreate]):
+async def bulk_create_teams(teams: List[TeamCreate], _: bool = Depends(verify_api_key)):
     created_teams = []
     for team_input in teams:
         team = Team(**team_input.model_dump())
@@ -1263,11 +1543,11 @@ async def bulk_create_teams(teams: List[TeamCreate]):
 
 # Configuration
 @api_router.get("/config")
-async def get_config():
+async def get_config(_: bool = Depends(verify_api_key)):
     return storage.get_config()
 
 @api_router.put("/config")
-async def update_config(config_update: NotificationConfigUpdate):
+async def update_config(config_update: NotificationConfigUpdate, _: bool = Depends(verify_api_key)):
     current_config = storage.get_config()
     update_data = {k: v for k, v in config_update.model_dump().items() if v is not None}
     current_config.update(update_data)
@@ -1280,21 +1560,23 @@ async def update_config(config_update: NotificationConfigUpdate):
 
 # Cost Data
 @api_router.get("/costs/history")
-async def get_cost_history(team_name: Optional[str] = None, month: Optional[str] = None, limit: int = Query(default=100, le=1000)):
+async def get_cost_history(team_name: Optional[str] = None, month: Optional[str] = None, 
+                           limit: int = Query(default=100, le=1000), _: bool = Depends(verify_api_key)):
     return storage.get_cost_history(team_name, month, limit)
 
 @api_router.get("/anomalies")
-async def get_anomalies(team_name: Optional[str] = None, limit: int = Query(default=50, le=500)):
+async def get_anomalies(team_name: Optional[str] = None, limit: int = Query(default=50, le=500),
+                        _: bool = Depends(verify_api_key)):
     return storage.get_anomalies(team_name, limit)
 
 # AI Endpoints
 @api_router.get("/ai/insights")
-async def get_ai_insights(limit: int = Query(default=20, le=100)):
+async def get_ai_insights(limit: int = Query(default=20, le=100), _: bool = Depends(verify_api_key)):
     """Get historical AI insights"""
     return storage.get_ai_insights(limit)
 
 @api_router.post("/ai/analyze/{team_id}")
-async def analyze_team_with_ai(team_id: str):
+async def analyze_team_with_ai(team_id: str, _: bool = Depends(verify_api_key)):
     """Run AI analysis for a specific team"""
     team = storage.get_team_by_id(team_id)
     if not team:
@@ -1318,7 +1600,7 @@ async def analyze_team_with_ai(team_id: str):
     }
 
 @api_router.get("/ai/recommendations")
-async def get_org_recommendations():
+async def get_org_recommendations(_: bool = Depends(verify_api_key)):
     """Get AI-powered organization-wide recommendations"""
     teams = storage.get_all_teams()
     if not teams:
@@ -1337,12 +1619,12 @@ async def get_org_recommendations():
 
 # Manual Triggers
 @api_router.post("/trigger/weekly-report")
-async def trigger_weekly_report(background_tasks: BackgroundTasks):
+async def trigger_weekly_report(background_tasks: BackgroundTasks, _: bool = Depends(verify_api_key)):
     background_tasks.add_task(run_weekly_report)
     return {"message": "AI-powered weekly report generation triggered", "status": "processing"}
 
 @api_router.post("/trigger/team-report/{team_id}")
-async def trigger_team_report(team_id: str, background_tasks: BackgroundTasks):
+async def trigger_team_report(team_id: str, background_tasks: BackgroundTasks, _: bool = Depends(verify_api_key)):
     team = storage.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
@@ -1358,7 +1640,7 @@ async def trigger_team_report(team_id: str, background_tasks: BackgroundTasks):
     return {"message": f"AI report triggered for team {team['team_name']}", "status": "processing"}
 
 @api_router.get("/preview/team-report/{team_id}")
-async def preview_team_report(team_id: str):
+async def preview_team_report(team_id: str, _: bool = Depends(verify_api_key)):
     team = storage.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
@@ -1376,7 +1658,7 @@ async def preview_team_report(team_id: str):
     }
 
 @api_router.get("/preview/admin-report")
-async def preview_admin_report():
+async def preview_admin_report(_: bool = Depends(verify_api_key)):
     teams = storage.get_all_teams()
     if not teams:
         raise HTTPException(status_code=404, detail="No teams configured")
@@ -1412,25 +1694,27 @@ async def preview_admin_report():
 
 # Scheduler Status
 @api_router.get("/scheduler/status")
-async def get_scheduler_status():
+async def get_scheduler_status(_: bool = Depends(verify_api_key)):
     jobs = scheduler.get_jobs()
     job_info = []
     for job in jobs:
         job_info.append({
             "id": job.id,
             "name": job.name,
-            "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None
+            "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
+            "timezone": str(job.next_run_time.tzinfo) if job.next_run_time else "UTC"
         })
     
     return {
         "running": scheduler.running,
         "jobs": job_info,
+        "scheduler_timezone": "UTC",
         "ai_model": "gemini-3-flash-preview",
         "ai_configured": bool(ai_service.api_key)
     }
 
 @api_router.get("/storage/info")
-async def get_storage_info():
+async def get_storage_info(_: bool = Depends(verify_api_key)):
     return {
         "type": "AWS S3" if storage.use_s3 else "Local File (Demo Mode)",
         "bucket": storage.bucket_name if storage.use_s3 else str(storage.local_storage_dir),
@@ -1453,6 +1737,7 @@ app.add_middleware(
 # ==================== SCHEDULER SETUP ====================
 
 def reschedule_weekly_job(config: Dict):
+    """Schedule weekly job with explicit UTC timezone"""
     try:
         if scheduler.get_job('weekly_cost_report'):
             scheduler.remove_job('weekly_cost_report')
@@ -1467,7 +1752,7 @@ def reschedule_weekly_job(config: Dict):
         
         scheduler.add_job(
             run_weekly_report,
-            CronTrigger(day_of_week=day_map.get(day, 0), hour=hour, minute=0),
+            CronTrigger(day_of_week=day_map.get(day, 0), hour=hour, minute=0, timezone='UTC'),
             id='weekly_cost_report',
             name='Weekly AI Cost Report',
             replace_existing=True
@@ -1483,7 +1768,13 @@ async def startup_event():
     config = storage.get_config()
     reschedule_weekly_job(config)
     scheduler.start()
-    logger.info(f"AWS Cost AI Agent started (AI: {'Gemini 3 Flash' if ai_service.api_key else 'Not configured'})")
+    
+    auth_status = "DISABLED" if os.environ.get('DISABLE_AUTH', '').lower() == 'true' else "ENABLED"
+    logger.info(f"AWS Cost AI Agent v3.1.0 started")
+    logger.info(f"  AI: {'Gemini 3 Flash' if ai_service.api_key else 'Not configured'}")
+    logger.info(f"  Storage: {'S3' if storage.use_s3 else 'Local (Demo)'}")
+    logger.info(f"  Auth: {auth_status}")
+    logger.info(f"  Scheduler: UTC timezone")
 
 @app.on_event("shutdown")
 async def shutdown_event():
