@@ -7,10 +7,11 @@ Create a one-page notification system for AWS costs across 84 accounts managed b
 - Send automatic weekly notifications with summary and detailed cost anomalies
 - Each team gets their own cost data, admins get all teams' data
 - Backend-only automation (no web dashboard)
+- Use AWS S3 for storage (no database)
 
 ## Architecture
 - **Backend**: FastAPI with APScheduler
-- **Database**: MongoDB
+- **Storage**: AWS S3 (with local file fallback for demo)
 - **Data Source**: Datadog API (with mock fallback)
 - **Notifications**: SMTP Email (Outlook compatible)
 
@@ -27,21 +28,30 @@ Create a one-page notification system for AWS costs across 84 accounts managed b
 - [x] Weekly automated scheduling
 - [x] Team management API
 - [x] Configuration management API
+- [x] S3 storage (with local fallback)
 
 ## What's Been Implemented (Feb 12, 2026)
-1. **DatadogService**: Fetches aws.cost.* metrics (mock data fallback when no credentials)
-2. **CostAnalyzer**: Compares months, calculates % change, flags anomalies
-3. **EmailService**: Generates HTML emails, sends via SMTP
-4. **APScheduler**: Weekly cron job, configurable day/hour
-5. **REST APIs**:
-   - Team CRUD + bulk create
-   - Configuration management
-   - Cost history & anomalies queries
-   - Manual triggers & previews
+1. **S3Storage**: JSON file storage in S3 (local fallback when no credentials)
+2. **DatadogService**: Fetches aws.cost.* metrics (mock data fallback)
+3. **CostAnalyzer**: Compares months, calculates % change, flags anomalies
+4. **EmailService**: Generates HTML emails, sends via SMTP
+5. **APScheduler**: Weekly cron job, configurable day/hour
+6. **REST APIs**: Full CRUD for teams, config, history
+
+## S3 Bucket Structure
+```
+aws-cost-agent-data/
+├── config/notification_config.json
+├── teams/teams.json
+├── costs/{year}/{month}/{account_id}.json
+└── anomalies/{year}/{month}/anomalies.json
+```
 
 ## Prioritized Backlog
 
 ### P0 - Done
+- [x] S3 storage implementation
+- [x] Local file fallback for demo
 - [x] Core cost fetching logic
 - [x] Anomaly detection
 - [x] Email templates (team & admin)
@@ -49,20 +59,21 @@ Create a one-page notification system for AWS costs across 84 accounts managed b
 - [x] Scheduler setup
 
 ### P1 - Next
-- [ ] Datadog API integration (need credentials)
-- [ ] SMTP configuration (need Outlook credentials)
-- [ ] Bulk import 84 teams from CSV
+- [ ] Configure AWS S3 credentials
+- [ ] Configure Datadog API credentials
+- [ ] Configure SMTP credentials for Outlook
+- [ ] Bulk import 84 teams
 
 ### P2 - Future
-- [ ] JWT authentication for API security
+- [ ] Lambda deployment option
 - [ ] Historical trend analysis
 - [ ] Service-level anomaly detection
 - [ ] Slack notification option
-- [ ] Daily digest option
 
 ## Next Tasks
-1. Configure Datadog credentials (DATADOG_API_KEY, DATADOG_APP_KEY)
-2. Configure SMTP credentials for Outlook
-3. Import all 84 teams (use /api/teams/bulk endpoint)
-4. Set global admin emails
-5. Test with real data
+1. Create S3 bucket and IAM credentials
+2. Add AWS credentials to .env
+3. Add Datadog credentials to .env
+4. Configure SMTP for Outlook
+5. Import all 84 teams
+6. Test with real data
