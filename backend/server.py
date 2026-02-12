@@ -1718,7 +1718,7 @@ async def get_scheduler_status(_: bool = Depends(verify_api_key)):
         "running": scheduler.running,
         "jobs": job_info,
         "scheduler_timezone": "UTC",
-        "ai_model": "gemini-3-flash-preview",
+        "ai_model": "gemini-1.5-flash",
         "ai_configured": bool(ai_service.api_key)
     }
 
