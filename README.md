@@ -1,18 +1,18 @@
-# AWS Cost Notification Agent
+# AWS Cost Notification Agent (S3 Storage Version)
 
 ## Complete Installation & Setup Guide
 
-A backend automation system that monitors AWS costs across 84 accounts, detects anomalies, and sends weekly email reports to teams and admins.
+A **serverless-friendly** backend automation system that monitors AWS costs across 84 accounts, detects anomalies, and sends weekly email reports. **Uses AWS S3 for storage - NO DATABASE REQUIRED!**
 
 ---
 
 ## Table of Contents
 
-1. [What You Need (Prerequisites)](#what-you-need-prerequisites)
-2. [Server Requirements](#server-requirements)
-3. [Architecture Overview](#architecture-overview)
-4. [Installation Options](#installation-options)
-5. [Step-by-Step Setup](#step-by-step-setup)
+1. [Architecture Overview](#architecture-overview)
+2. [What You Need (Prerequisites)](#what-you-need-prerequisites)
+3. [Server Requirements](#server-requirements)
+4. [S3 Bucket Structure](#s3-bucket-structure)
+5. [Step-by-Step Installation](#step-by-step-installation)
 6. [Configuration Guide](#configuration-guide)
 7. [Adding Your 84 Teams](#adding-your-84-teams)
 8. [Testing Everything](#testing-everything)
@@ -22,50 +22,144 @@ A backend automation system that monitors AWS costs across 84 accounts, detects 
 
 ---
 
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           YOUR SERVER / LAMBDA                               │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │                    AWS COST NOTIFICATION AGENT                          │ │
+│  │                       (Python FastAPI v2.0)                             │ │
+│  │                                                                         │ │
+│  │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐             │ │
+│  │  │   DATADOG    │───►│    COST      │───►│    EMAIL     │             │ │
+│  │  │   SERVICE    │    │   ANALYZER   │    │   SERVICE    │             │ │
+│  │  └──────────────┘    └──────────────┘    └──────────────┘             │ │
+│  │         │                   │                   │                      │ │
+│  │         ▼                   ▼                   ▼                      │ │
+│  │   Fetch aws.cost.*    Compare months      Send HTML emails            │ │
+│  │   from Datadog        Detect anomalies    Teams + Admins              │ │
+│  │                                                                         │ │
+│  │  ┌───────────────────────────────────────────────────────────────────┐ │ │
+│  │  │                    SCHEDULER (APScheduler)                         │ │ │
+│  │  │              Configurable: Day + Hour (UTC)                        │ │ │
+│  │  └───────────────────────────────────────────────────────────────────┘ │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                                     │                                        │
+└─────────────────────────────────────│────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              AWS S3 BUCKET                                   │
+│                         (aws-cost-agent-data)                                │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │                                                                          ││
+│  │   📁 config/                                                            ││
+│  │   └── notification_config.json     ← Settings, thresholds, admin emails ││
+│  │                                                                          ││
+│  │   📁 teams/                                                             ││
+│  │   └── teams.json                   ← All 84 team/account mappings       ││
+│  │                                                                          ││
+│  │   📁 costs/                                                             ││
+│  │   └── 2026/                                                             ││
+│  │       └── 02/                                                           ││
+│  │           ├── 123456789012.json    ← Cost history per account           ││
+│  │           ├── 234567890123.json                                         ││
+│  │           └── ...                                                       ││
+│  │                                                                          ││
+│  │   📁 anomalies/                                                         ││
+│  │   └── 2026/                                                             ││
+│  │       └── 02/                                                           ││
+│  │           └── anomalies.json       ← Detected cost spikes               ││
+│  │                                                                          ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────────────┘
+                │                                          │
+                ▼                                          ▼
+    ┌───────────────────┐                    ┌───────────────────┐
+    │     DATADOG       │                    │   OUTLOOK/SMTP    │
+    │   (Cost Data)     │                    │   (Send Emails)   │
+    │                   │                    │                   │
+    │  aws.cost.*       │                    │  Team reports     │
+    │  84 accounts      │                    │  Admin summary    │
+    └───────────────────┘                    └───────────────────┘
+```
+
+### Why S3 Instead of MongoDB?
+
+| Feature | MongoDB | S3 |
+|---------|---------|-----|
+| **Cost** | ~$20-50/month (managed) | ~$0.01-0.10/month |
+| **Maintenance** | Backups, scaling, patches | Zero maintenance |
+| **Setup** | Install, configure, secure | Just create bucket |
+| **Serverless** | Needs connection pooling | Native support |
+| **Data access** | Query language | Simple JSON files |
+| **Durability** | 99.99% | 99.999999999% (11 9's) |
+
+---
+
 ## What You Need (Prerequisites)
 
-### 1. Datadog Account & API Keys
-You need these from Datadog to fetch AWS cost data:
+### 1. AWS Account & Credentials
 
-| Credential | Where to Get It | Purpose |
-|------------|-----------------|---------|
-| **API Key** | Datadog → Organization Settings → API Keys → New Key | Read access to metrics |
-| **Application Key** | Datadog → Organization Settings → Application Keys → New Key | Advanced API operations |
-| **Site** | Check your Datadog URL | `datadoghq.com` (US) or `datadoghq.eu` (EU) |
+You need an IAM user with S3 access:
 
-**How to get Datadog keys:**
-1. Login to https://app.datadoghq.com (or your EU URL)
-2. Click your profile icon → Organization Settings
-3. Go to "API Keys" → Click "New Key" → Copy the key
-4. Go to "Application Keys" → Click "New Key" → Copy the key
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::aws-cost-agent-data",
+        "arn:aws:s3:::aws-cost-agent-data/*"
+      ]
+    }
+  ]
+}
+```
 
-### 2. Email (SMTP) Credentials
-For sending emails to Outlook/Office 365:
+**How to create IAM credentials:**
+1. Go to AWS Console → IAM → Users → Create User
+2. User name: `cost-agent-service`
+3. Attach policy above (or `AmazonS3FullAccess` for testing)
+4. Create Access Key → Download CSV
+5. Save: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
 
-| Setting | Value for Office 365 |
-|---------|---------------------|
+### 2. Datadog API Keys
+
+| Credential | Where to Get It |
+|------------|-----------------|
+| **API Key** | Datadog → Organization Settings → API Keys |
+| **App Key** | Datadog → Organization Settings → Application Keys |
+| **Site** | `datadoghq.com` (US) or `datadoghq.eu` (EU) |
+
+### 3. Email (SMTP) Credentials
+
+For Office 365 / Outlook:
+
+| Setting | Value |
+|---------|-------|
 | SMTP Host | `smtp.office365.com` |
 | SMTP Port | `587` |
-| SMTP User | Your email (e.g., `aws-notifications@yourcompany.com`) |
-| SMTP Password | Your password or App Password |
-| Sender Email | Same as SMTP User |
+| SMTP User | Your email address |
+| SMTP Password | Password or App Password |
 
-**Note:** If your organization uses MFA, you'll need to create an "App Password" in Microsoft 365.
+### 4. Team Mapping Data
 
-### 3. Team Mapping Data
-You need a list of your 84 teams with:
+List of 84 teams with:
 - Team name
 - AWS Account ID (12 digits)
 - Team email address
-
-Example format:
-```csv
-team_name,aws_account_id,team_email
-Platform Team,123456789012,platform@yourcompany.com
-DevOps Team,234567890123,devops@yourcompany.com
-Data Science,345678901234,datascience@yourcompany.com
-...
-```
 
 ---
 
@@ -73,177 +167,123 @@ Data Science,345678901234,datascience@yourcompany.com
 
 ### Do I Need a Server?
 
-**YES** - This is a backend service that needs to run continuously to:
-1. Execute scheduled weekly jobs
-2. Serve API endpoints
-3. Connect to MongoDB database
+**YES** - but simpler than before (no database to manage!)
 
-### Server Options
+### Options (Simplest to Most Complex)
 
-| Option | Cost | Difficulty | Recommended For |
-|--------|------|------------|-----------------|
-| **AWS EC2 (t3.small)** | ~$15/month | Medium | Production |
-| **AWS Lambda + EventBridge** | ~$1/month | Hard | Cost-conscious |
-| **Docker on existing server** | $0 extra | Easy | If you have infra |
-| **Azure App Service** | ~$13/month | Easy | Microsoft shops |
-| **DigitalOcean Droplet** | $6/month | Easy | Budget option |
-| **Your laptop (testing only)** | $0 | Easy | Development only |
+| Option | Cost | Best For |
+|--------|------|----------|
+| **AWS Lambda + EventBridge** | ~$1/month | Serverless, scheduled only |
+| **AWS ECS Fargate** | ~$10/month | Container, always-on |
+| **EC2 t3.micro** | ~$8/month | Simple VM |
+| **Docker on existing server** | $0 extra | If you have infra |
 
-### Minimum Server Specs
+### Minimum Specs (if using EC2/VM)
 
 ```
 CPU: 1 vCPU
-RAM: 1 GB (2 GB recommended)
-Storage: 10 GB
-OS: Ubuntu 22.04 LTS (recommended) or any Linux
-Network: Outbound access to:
-  - api.datadoghq.com (port 443)
-  - smtp.office365.com (port 587)
-  - MongoDB (port 27017)
+RAM: 512 MB (1 GB recommended)
+Storage: 5 GB (code + logs only, data in S3)
+OS: Ubuntu 22.04 LTS or Amazon Linux 2
+```
+
+### Network Access Required
+
+```
+Outbound only:
+- s3.amazonaws.com (port 443)
+- api.datadoghq.com (port 443)
+- smtp.office365.com (port 587)
 ```
 
 ---
 
-## Architecture Overview
+## S3 Bucket Structure
+
+The agent automatically creates and manages this structure:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                              YOUR SERVER                                 │
-│                                                                          │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                     AWS COST NOTIFICATION AGENT                     │ │
-│  │                         (Python FastAPI)                            │ │
-│  │                                                                     │ │
-│  │  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐              │ │
-│  │  │  DATADOG    │──►│   COST      │──►│   EMAIL     │              │ │
-│  │  │  SERVICE    │   │  ANALYZER   │   │  SERVICE    │              │ │
-│  │  └─────────────┘   └─────────────┘   └─────────────┘              │ │
-│  │         │                 │                 │                      │ │
-│  │         ▼                 ▼                 ▼                      │ │
-│  │   Fetch costs      Compare months    Send HTML emails             │ │
-│  │   from Datadog     Detect anomalies  to teams & admins            │ │
-│  │                                                                     │ │
-│  │  ┌──────────────────────────────────────────────────────────────┐ │ │
-│  │  │                    SCHEDULER (APScheduler)                    │ │ │
-│  │  │              Runs every Monday at 9:00 AM UTC                 │ │ │
-│  │  └──────────────────────────────────────────────────────────────┘ │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-│                                                                          │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                         MONGODB DATABASE                            │ │
-│  │  • teams              - Your 84 team/account mappings               │ │
-│  │  • cost_history       - Historical cost records                     │ │
-│  │  • anomalies          - Detected cost spikes                        │ │
-│  │  • notification_config - Settings (threshold, schedule, emails)     │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────────┘
-                │                                          │
-                ▼                                          ▼
-    ┌───────────────────┐                    ┌───────────────────┐
-    │     DATADOG       │                    │   OUTLOOK/SMTP    │
-    │   (Cost Data)     │                    │   (Send Emails)   │
-    └───────────────────┘                    └───────────────────┘
+aws-cost-agent-data/                    ← Your bucket name
+│
+├── config/
+│   └── notification_config.json        ← Agent settings
+│       {
+│         "anomaly_threshold": 20.0,
+│         "schedule_day": "monday",
+│         "schedule_hour": 9,
+│         "global_admin_emails": ["admin@company.com"],
+│         ...
+│       }
+│
+├── teams/
+│   └── teams.json                      ← All 84 teams
+│       {
+│         "teams": [
+│           {"team_name": "Platform", "aws_account_id": "123...", "team_email": "..."},
+│           {"team_name": "DevOps", "aws_account_id": "234...", "team_email": "..."},
+│           ...
+│         ]
+│       }
+│
+├── costs/
+│   └── 2026/
+│       └── 02/
+│           ├── 123456789012.json       ← Cost records per account
+│           ├── 234567890123.json
+│           └── ...
+│
+└── anomalies/
+    └── 2026/
+        └── 02/
+            └── anomalies.json          ← All anomalies for the month
 ```
 
 ---
 
-## Installation Options
+## Step-by-Step Installation
 
 ### Option A: Docker (Recommended)
 
-**Best for:** Quick setup, isolated environment, easy updates
-
-### Option B: Direct Installation on Linux Server
-
-**Best for:** Full control, custom configurations
-
-### Option C: AWS Lambda (Serverless)
-
-**Best for:** Cost-conscious, infrequent runs only
-
----
-
-## Step-by-Step Setup
-
-### Option A: Docker Installation
-
-#### Step 1: Install Docker on Your Server
+#### Step 1: Create Project Directory
 
 ```bash
-# Connect to your server
-ssh user@your-server-ip
-
-# Install Docker (Ubuntu/Debian)
-sudo apt update
-sudo apt install -y docker.io docker-compose
-
-# Start Docker
-sudo systemctl start docker
-sudo systemctl enable docker
-
-# Verify installation
-docker --version
-docker-compose --version
-```
-
-#### Step 2: Create Project Directory
-
-```bash
-# Create directory
 mkdir -p /opt/aws-cost-agent
 cd /opt/aws-cost-agent
 ```
 
-#### Step 3: Create docker-compose.yml
+#### Step 2: Create docker-compose.yml
 
-```bash
-cat > docker-compose.yml << 'EOF'
+```yaml
 version: '3.8'
 
 services:
-  mongodb:
-    image: mongo:7.0
-    container_name: cost-agent-mongodb
-    restart: always
-    volumes:
-      - mongodb_data:/data/db
-    networks:
-      - cost-agent-network
-
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: cost-agent-backend
+    container_name: cost-agent
     restart: always
     ports:
       - "8001:8001"
     environment:
-      - MONGO_URL=mongodb://mongodb:27017
-      - DB_NAME=aws_cost_agent
+      # AWS S3 Configuration
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME:-aws-cost-agent-data}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      # Datadog Configuration
       - DATADOG_API_KEY=${DATADOG_API_KEY}
       - DATADOG_APP_KEY=${DATADOG_APP_KEY}
       - DATADOG_SITE=${DATADOG_SITE:-datadoghq.com}
+      # SMTP Configuration
       - SMTP_HOST=${SMTP_HOST}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - SENDER_EMAIL=${SENDER_EMAIL}
-    depends_on:
-      - mongodb
-    networks:
-      - cost-agent-network
-
-volumes:
-  mongodb_data:
-
-networks:
-  cost-agent-network:
-    driver: bridge
-EOF
 ```
 
-#### Step 4: Create Backend Directory & Dockerfile
+#### Step 3: Create Dockerfile
 
 ```bash
 mkdir -p backend
@@ -252,214 +292,162 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application
 COPY server.py .
 
-# Expose port
 EXPOSE 8001
 
-# Run application
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8001"]
 EOF
 ```
 
-#### Step 5: Create requirements.txt
+#### Step 4: Create requirements.txt
 
 ```bash
 cat > backend/requirements.txt << 'EOF'
 fastapi==0.110.1
 uvicorn==0.25.0
 python-dotenv>=1.0.1
-pymongo==4.5.0
-motor==3.3.1
 pydantic>=2.6.4
 email-validator>=2.2.0
 apscheduler>=3.10.0
 httpx>=0.25.0
+boto3>=1.34.0
 EOF
-```
-
-#### Step 6: Copy server.py
-
-Copy the `server.py` file from this repository to `backend/server.py`
-
-```bash
-# If you have the file locally
-cp /path/to/server.py backend/server.py
-
-# Or download it
-curl -o backend/server.py https://your-repo-url/server.py
-```
-
-#### Step 7: Create Environment File
-
-```bash
-cat > .env << 'EOF'
-# Datadog Configuration
-DATADOG_API_KEY=your_datadog_api_key_here
-DATADOG_APP_KEY=your_datadog_app_key_here
-DATADOG_SITE=datadoghq.com
-
-# SMTP Configuration (Office 365)
-SMTP_HOST=smtp.office365.com
-SMTP_PORT=587
-SMTP_USER=aws-notifications@yourcompany.com
-SMTP_PASSWORD=your_email_password_here
-SENDER_EMAIL=aws-notifications@yourcompany.com
-EOF
-
-# Secure the file
-chmod 600 .env
-```
-
-#### Step 8: Start the Services
-
-```bash
-# Build and start
-docker-compose up -d
-
-# Check status
-docker-compose ps
-
-# View logs
-docker-compose logs -f backend
-```
-
-#### Step 9: Verify Installation
-
-```bash
-# Test the API
-curl http://localhost:8001/api/health
-
-# Expected response:
-# {"status":"healthy","timestamp":"2026-02-12T10:00:00+00:00"}
-```
-
----
-
-### Option B: Direct Linux Installation
-
-#### Step 1: Install System Dependencies
-
-```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
-
-# Install Python 3.11
-sudo apt install -y python3.11 python3.11-venv python3-pip
-
-# Install MongoDB
-wget -qO - https://www.mongodb.org/static/pgp/server-7.0.asc | sudo apt-key add -
-echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-sudo apt update
-sudo apt install -y mongodb-org
-
-# Start MongoDB
-sudo systemctl start mongod
-sudo systemctl enable mongod
-```
-
-#### Step 2: Create Application User
-
-```bash
-# Create dedicated user
-sudo useradd -m -s /bin/bash costapp
-sudo su - costapp
-```
-
-#### Step 3: Setup Application
-
-```bash
-# Create directory
-mkdir -p ~/aws-cost-agent
-cd ~/aws-cost-agent
-
-# Create virtual environment
-python3.11 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install fastapi uvicorn python-dotenv pymongo motor pydantic email-validator apscheduler httpx
-```
-
-#### Step 4: Create Environment File
-
-```bash
-cat > .env << 'EOF'
-MONGO_URL=mongodb://localhost:27017
-DB_NAME=aws_cost_agent
-
-# Datadog
-DATADOG_API_KEY=your_datadog_api_key_here
-DATADOG_APP_KEY=your_datadog_app_key_here
-DATADOG_SITE=datadoghq.com
-
-# SMTP
-SMTP_HOST=smtp.office365.com
-SMTP_PORT=587
-SMTP_USER=aws-notifications@yourcompany.com
-SMTP_PASSWORD=your_email_password_here
-SENDER_EMAIL=aws-notifications@yourcompany.com
-EOF
-
-chmod 600 .env
 ```
 
 #### Step 5: Copy server.py
 
-Copy the `server.py` file to `~/aws-cost-agent/server.py`
+Copy the `server.py` file to `backend/server.py`
 
-#### Step 6: Create Systemd Service
+#### Step 6: Create .env File
 
 ```bash
+cat > .env << 'EOF'
+# AWS S3 Configuration (REQUIRED)
+S3_BUCKET_NAME=aws-cost-agent-data
+AWS_ACCESS_KEY_ID=AKIA...your-key...
+AWS_SECRET_ACCESS_KEY=...your-secret...
+AWS_REGION=us-east-1
+
+# Datadog Configuration (REQUIRED for real data)
+DATADOG_API_KEY=your_datadog_api_key
+DATADOG_APP_KEY=your_datadog_app_key
+DATADOG_SITE=datadoghq.com
+
+# SMTP Configuration (REQUIRED for emails)
+SMTP_HOST=smtp.office365.com
+SMTP_PORT=587
+SMTP_USER=aws-notifications@yourcompany.com
+SMTP_PASSWORD=your_password
+SENDER_EMAIL=aws-notifications@yourcompany.com
+EOF
+
+chmod 600 .env
+```
+
+#### Step 7: Start the Service
+
+```bash
+docker-compose up -d
+docker-compose logs -f
+```
+
+#### Step 8: Verify
+
+```bash
+curl http://localhost:8001/api/health
+# Expected: {"status":"healthy","timestamp":"...","storage":"S3"}
+```
+
+---
+
+### Option B: AWS Lambda (Serverless)
+
+For Lambda deployment, you'll need to:
+
+1. Package the code with dependencies
+2. Create Lambda function
+3. Set up EventBridge for weekly schedule
+4. Configure environment variables
+
+**Lambda Handler (create `lambda_handler.py`):**
+
+```python
+from mangum import Mangum
+from server import app
+
+handler = Mangum(app, lifespan="off")
+```
+
+**Add to requirements.txt:**
+```
+mangum>=0.17.0
+```
+
+**EventBridge Rule:**
+```
+cron(0 9 ? * MON *)  # Every Monday at 9:00 UTC
+```
+
+---
+
+### Option C: Direct Linux Installation
+
+```bash
+# 1. Install Python
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv
+
+# 2. Create app directory
+sudo mkdir -p /opt/aws-cost-agent
+cd /opt/aws-cost-agent
+
+# 3. Create virtual environment
+python3.11 -m venv venv
+source venv/bin/activate
+
+# 4. Install dependencies
+pip install fastapi uvicorn python-dotenv pydantic email-validator apscheduler httpx boto3
+
+# 5. Copy server.py and create .env
+
+# 6. Create systemd service
 sudo cat > /etc/systemd/system/aws-cost-agent.service << 'EOF'
 [Unit]
 Description=AWS Cost Notification Agent
-After=network.target mongod.service
+After=network.target
 
 [Service]
 Type=simple
-User=costapp
-WorkingDirectory=/home/costapp/aws-cost-agent
-Environment=PATH=/home/costapp/aws-cost-agent/venv/bin
-ExecStart=/home/costapp/aws-cost-agent/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8001
+User=root
+WorkingDirectory=/opt/aws-cost-agent
+Environment=PATH=/opt/aws-cost-agent/venv/bin
+EnvironmentFile=/opt/aws-cost-agent/.env
+ExecStart=/opt/aws-cost-agent/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8001
 Restart=always
-RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Start service
+# 7. Start service
 sudo systemctl daemon-reload
 sudo systemctl start aws-cost-agent
 sudo systemctl enable aws-cost-agent
-
-# Check status
-sudo systemctl status aws-cost-agent
 ```
 
 ---
 
 ## Configuration Guide
 
-### Step 1: Access the API
+### Set Notification Settings
 
 ```bash
-# If using Docker
 API_URL="http://localhost:8001"
 
-# If using remote server
-API_URL="http://your-server-ip:8001"
-```
-
-### Step 2: Configure Notification Settings
-
-```bash
 curl -X PUT "$API_URL/api/config" \
   -H "Content-Type: application/json" \
   -d '{
@@ -468,53 +456,37 @@ curl -X PUT "$API_URL/api/config" \
     "schedule_hour": 9,
     "global_admin_emails": [
       "admin1@yourcompany.com",
-      "admin2@yourcompany.com",
-      "finance-team@yourcompany.com"
+      "admin2@yourcompany.com"
     ]
   }'
 ```
 
-**Configuration Options:**
+### Configuration Options
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `anomaly_threshold` | float | 20.0 | % increase to flag as anomaly |
-| `schedule_day` | string | "monday" | Day of weekly report |
+| `schedule_day` | string | "monday" | Weekly report day |
 | `schedule_hour` | int | 9 | Hour in UTC (0-23) |
-| `global_admin_emails` | list | [] | Emails receiving consolidated report |
-| `smtp_host` | string | "" | SMTP server (can also set in .env) |
-| `smtp_port` | int | 587 | SMTP port |
-| `smtp_user` | string | "" | SMTP username |
-| `smtp_password` | string | "" | SMTP password |
-| `sender_email` | string | "" | From address |
-
-### Step 3: Verify Configuration
-
-```bash
-curl "$API_URL/api/config" | python3 -m json.tool
-```
+| `global_admin_emails` | list | [] | Admin emails |
 
 ---
 
 ## Adding Your 84 Teams
 
-### Method 1: Bulk Upload via API (Recommended)
+### Method 1: Bulk Upload (Recommended)
 
-#### Create a JSON file with all teams:
+Create `teams.json`:
 
-```bash
-cat > teams.json << 'EOF'
+```json
 [
-  {"team_name": "Platform Team", "aws_account_id": "123456789012", "team_email": "platform@yourcompany.com"},
-  {"team_name": "DevOps Team", "aws_account_id": "234567890123", "team_email": "devops@yourcompany.com"},
-  {"team_name": "Data Science", "aws_account_id": "345678901234", "team_email": "datascience@yourcompany.com"},
-  {"team_name": "Frontend Team", "aws_account_id": "456789012345", "team_email": "frontend@yourcompany.com"},
-  {"team_name": "Backend Team", "aws_account_id": "567890123456", "team_email": "backend@yourcompany.com"}
+  {"team_name": "Platform Team", "aws_account_id": "123456789012", "team_email": "platform@company.com"},
+  {"team_name": "DevOps Team", "aws_account_id": "234567890123", "team_email": "devops@company.com"},
+  {"team_name": "Data Science", "aws_account_id": "345678901234", "team_email": "datascience@company.com"}
 ]
-EOF
 ```
 
-#### Upload to API:
+Upload:
 
 ```bash
 curl -X POST "$API_URL/api/teams/bulk" \
@@ -522,17 +494,9 @@ curl -X POST "$API_URL/api/teams/bulk" \
   -d @teams.json
 ```
 
-### Method 2: Convert from CSV
+### Method 2: From CSV
 
-If you have a CSV file:
-
-```bash
-# teams.csv format:
-# team_name,aws_account_id,team_email
-# Platform Team,123456789012,platform@yourcompany.com
-
-# Convert CSV to JSON and upload
-python3 << 'EOF'
+```python
 import csv
 import json
 import requests
@@ -552,137 +516,96 @@ response = requests.post(
     json=teams
 )
 print(response.json())
-EOF
-```
-
-### Method 3: Add Teams One by One
-
-```bash
-curl -X POST "$API_URL/api/teams" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "team_name": "Platform Team",
-    "aws_account_id": "123456789012",
-    "team_email": "platform@yourcompany.com",
-    "admin_emails": ["team-lead@yourcompany.com"]
-  }'
-```
-
-### Verify Teams Added
-
-```bash
-# Count teams
-curl "$API_URL/api/teams" | python3 -c "import sys,json; print(f'Total teams: {len(json.load(sys.stdin))}')"
-
-# List all teams
-curl "$API_URL/api/teams" | python3 -m json.tool
 ```
 
 ---
 
 ## Testing Everything
 
-### Test 1: Health Check
+### 1. Health Check
 
 ```bash
 curl "$API_URL/api/health"
-# Expected: {"status":"healthy","timestamp":"..."}
 ```
 
-### Test 2: Scheduler Status
+### 2. Check S3 Storage
 
 ```bash
-curl "$API_URL/api/scheduler/status"
-# Expected: {"running":true,"jobs":[{"id":"weekly_cost_report",...}]}
+curl "$API_URL/api/storage/info"
 ```
 
-### Test 3: Preview Team Report (Without Sending)
+### 3. Add a Test Team
 
 ```bash
-# Get a team ID first
+curl -X POST "$API_URL/api/teams" \
+  -H "Content-Type: application/json" \
+  -d '{"team_name":"Test Team","aws_account_id":"999999999999","team_email":"test@company.com"}'
+```
+
+### 4. Preview Team Report
+
+```bash
+# Get team ID
 TEAM_ID=$(curl -s "$API_URL/api/teams" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['id'])")
 
-# Preview the report
-curl "$API_URL/api/preview/team-report/$TEAM_ID" | python3 -m json.tool
+# Preview report
+curl "$API_URL/api/preview/team-report/$TEAM_ID"
 ```
 
-### Test 4: Preview Admin Report (Without Sending)
+### 5. Preview Admin Report
 
 ```bash
-curl "$API_URL/api/preview/admin-report" | python3 -m json.tool
+curl "$API_URL/api/preview/admin-report"
 ```
 
-### Test 5: Trigger Manual Report (Sends Actual Emails)
+### 6. Trigger Manual Report
 
 ```bash
-# Only do this when SMTP is configured!
 curl -X POST "$API_URL/api/trigger/weekly-report"
 ```
 
-### Test 6: Check Logs After Manual Trigger
+### 7. Check S3 Bucket (via AWS CLI)
 
 ```bash
-# Docker
-docker-compose logs -f backend
-
-# Systemd
-sudo journalctl -u aws-cost-agent -f
+aws s3 ls s3://aws-cost-agent-data/ --recursive
 ```
 
 ---
 
-## Going Live
+## Going Live Checklist
 
-### Pre-Launch Checklist
-
-- [ ] Datadog API keys added to .env
-- [ ] SMTP credentials added to .env
+- [ ] AWS credentials configured (S3 access)
+- [ ] S3 bucket created (or auto-created by agent)
+- [ ] Datadog API keys added
+- [ ] SMTP credentials configured
 - [ ] All 84 teams imported
-- [ ] Admin emails configured
-- [ ] Anomaly threshold set appropriately
-- [ ] Schedule day/hour configured (UTC timezone!)
+- [ ] Admin emails set
 - [ ] Test email sent successfully
 - [ ] Preview reports look correct
-
-### Monitor the System
-
-```bash
-# Check scheduler next run
-curl "$API_URL/api/scheduler/status"
-
-# View recent anomalies
-curl "$API_URL/api/anomalies?limit=10"
-
-# View cost history
-curl "$API_URL/api/costs/history?limit=10"
-```
-
-### Set Up Monitoring (Recommended)
-
-Add a health check to your monitoring system:
-
-```bash
-# Simple health check script
-curl -sf "$API_URL/api/health" || echo "AWS Cost Agent DOWN!"
-```
+- [ ] Scheduler running (check `/api/scheduler/status`)
 
 ---
 
 ## Troubleshooting
 
-### Problem: "Datadog credentials not configured"
+### "Access Denied" on S3
 
-**Solution:** Add keys to .env file:
-```bash
-DATADOG_API_KEY=your_key_here
-DATADOG_APP_KEY=your_key_here
+1. Check IAM policy has correct bucket name
+2. Verify `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
+3. Check bucket region matches `AWS_REGION`
+
+### "Datadog credentials not configured"
+
+Add to `.env`:
 ```
-Then restart the service.
+DATADOG_API_KEY=your_key
+DATADOG_APP_KEY=your_key
+```
 
-### Problem: "SMTP not configured"
+### "SMTP not configured"
 
-**Solution:** Add email settings:
-```bash
+Add to `.env`:
+```
 SMTP_HOST=smtp.office365.com
 SMTP_PORT=587
 SMTP_USER=your@email.com
@@ -690,48 +613,14 @@ SMTP_PASSWORD=your_password
 SENDER_EMAIL=your@email.com
 ```
 
-### Problem: Emails not being received
-
-**Checklist:**
-1. Check spam folder
-2. Verify SMTP credentials
-3. Try with Gmail first (smtp.gmail.com, port 587)
-4. Check firewall allows outbound port 587
-5. For Office 365 with MFA, use App Password
-
-### Problem: No cost data from Datadog
-
-**Checklist:**
-1. Verify AWS Cost Management integration is enabled in Datadog
-2. Check `aws.cost.*` metrics exist in Datadog
-3. Verify API key has read permissions
-4. Check Datadog site is correct (US vs EU)
-
-### Problem: Scheduler not running
-
-```bash
-# Check status
-curl "$API_URL/api/scheduler/status"
-
-# If not running, restart the service
-docker-compose restart backend
-# or
-sudo systemctl restart aws-cost-agent
-```
-
 ### View Logs
 
 ```bash
 # Docker
-docker-compose logs -f backend
+docker-compose logs -f
 
 # Systemd
 sudo journalctl -u aws-cost-agent -f
-
-# Look for errors like:
-# - "Failed to connect to Datadog"
-# - "SMTP authentication failed"
-# - "MongoDB connection error"
 ```
 
 ---
@@ -745,61 +634,48 @@ http://your-server:8001/api
 
 ### Endpoints
 
-#### Health & Status
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/` | Agent info |
 | GET | `/health` | Health check |
+| GET | `/storage/info` | S3 bucket info |
 | GET | `/scheduler/status` | Scheduler status |
-
-#### Teams
-| Method | Endpoint | Description |
-|--------|----------|-------------|
 | GET | `/teams` | List all teams |
 | POST | `/teams` | Create team |
-| GET | `/teams/{id}` | Get team |
-| DELETE | `/teams/{id}` | Delete team |
 | POST | `/teams/bulk` | Bulk create |
-
-#### Configuration
-| Method | Endpoint | Description |
-|--------|----------|-------------|
+| DELETE | `/teams/{id}` | Delete team |
 | GET | `/config` | Get config |
 | PUT | `/config` | Update config |
-
-#### Cost Data
-| Method | Endpoint | Description |
-|--------|----------|-------------|
 | GET | `/costs/history` | Cost history |
 | GET | `/anomalies` | Anomalies list |
-
-#### Triggers & Previews
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/trigger/weekly-report` | Run report now |
-| POST | `/trigger/team-report/{id}` | Single team report |
+| POST | `/trigger/weekly-report` | Trigger report |
 | GET | `/preview/team-report/{id}` | Preview team email |
 | GET | `/preview/admin-report` | Preview admin email |
 
 ---
 
-## Security Recommendations
+## Cost Estimate
 
-1. **Use HTTPS** - Put a reverse proxy (nginx) in front with SSL
-2. **Add Authentication** - Consider adding JWT auth for API access
-3. **Firewall** - Only allow necessary ports (8001 from trusted IPs)
-4. **Secrets Management** - Use AWS Secrets Manager or HashiCorp Vault in production
-5. **Regular Updates** - Keep dependencies updated
+### Monthly Costs
+
+| Resource | Cost |
+|----------|------|
+| S3 Storage (< 1 GB) | ~$0.02 |
+| S3 Requests (~10k/month) | ~$0.01 |
+| EC2 t3.micro (if used) | ~$8.00 |
+| **Total (with EC2)** | **~$8.03** |
+| **Total (Lambda only)** | **~$0.10** |
+
+Compare to MongoDB Atlas: $20-50/month
 
 ---
 
-## Support
+## Security Best Practices
 
-If you encounter issues:
-1. Check this README's Troubleshooting section
-2. Review the logs for error messages
-3. Verify all prerequisites are met
-4. Test with mock data first (remove Datadog keys)
+1. **Never commit `.env` to git**
+2. **Use IAM roles on EC2** instead of access keys
+3. **Enable S3 bucket encryption**
+4. **Restrict S3 bucket access** to agent only
+5. **Use secrets manager** for production credentials
 
 ---
 
@@ -807,11 +683,12 @@ If you encounter issues:
 
 ```
 /opt/aws-cost-agent/
-├── docker-compose.yml      # Docker orchestration
-├── .env                    # Environment variables (secrets)
-├── backend/
-│   ├── Dockerfile          # Container definition
-│   ├── requirements.txt    # Python dependencies
-│   └── server.py           # Main application code
-└── teams.json              # Your 84 teams (optional)
+├── docker-compose.yml
+├── .env                    ← Secrets (chmod 600)
+└── backend/
+    ├── Dockerfile
+    ├── requirements.txt
+    └── server.py           ← Main application
 ```
+
+Data is stored in S3, not on the server!
