@@ -24,7 +24,46 @@
       "percentage_change": 26.1,
       "is_anomaly": true,
       "detected_at": "2026-02-12T02:00:38.402197+00:00"
+    },
+    {
+      "id": "e10dee32-84d9-429f-bbb3-d8eb75e78d0e",
+      "aws_account_id": "234567890123",
+      "team_name": "DevOps Team",
+      "current_month": "2026-02",
+      "current_cost": 22419.36,
+      "previous_month": "2026-01",
+      "previous_cost": 15771.78,
+      "percentage_change": 42.15,
+      "is_anomaly": true,
+      "ai_explanation": "Cost increased by 42.1%.\n\nTop cost changes:\n\u2022 RDS: \u2191 $3,310.41 (+152.9%)\n\u2022 CloudFront: \u2191 $2,528.64 (+9854.4%)\n\u2022 DynamoDB: \u2191 $2,399.87 (+89.2%)\n",
+      "detected_at": "2026-02-12T02:29:59.449312+00:00"
+    },
+    {
+      "id": "2688ebb1-fed9-4fee-85d8-070a60f52382",
+      "aws_account_id": "123456789012",
+      "team_name": "Test Platform Team",
+      "current_month": "2026-02",
+      "current_cost": 44490.16,
+      "previous_month": "2026-01",
+      "previous_cost": 27737.61,
+      "percentage_change": 60.4,
+      "is_anomaly": true,
+      "ai_explanation": "Cost increased by 60.4%.\n\nTop cost changes:\n\u2022 EC2: \u2191 $10,857.62 (+308.1%)\n\u2022 Lambda: \u2191 $8,037.15 (+2089.5%)\n\u2022 DynamoDB: \u2193 $4,285.31 (-46.6%)\n",
+      "detected_at": "2026-02-12T02:29:59.451415+00:00"
+    },
+    {
+      "id": "c2056084-5c6d-4beb-8ac3-e19d54b5e085",
+      "aws_account_id": "234567890123",
+      "team_name": "Test DevOps Team",
+      "current_month": "2026-02",
+      "current_cost": 46597.47,
+      "previous_month": "2026-01",
+      "previous_cost": 33424.39,
+      "percentage_change": 39.41,
+      "is_anomaly": true,
+      "ai_explanation": "Cost increased by 39.4%.\n\nTop cost changes:\n\u2022 S3: \u2193 $4,939.26 (-90.6%)\n\u2022 CloudFront: \u2191 $4,553.65 (+161.2%)\n\u2022 DynamoDB: \u2191 $4,075.56 (+162.4%)\n",
+      "detected_at": "2026-02-12T02:29:59.452093+00:00"
     }
   ],
-  "last_updated": "2026-02-12T02:00:38.402264+00:00"
+  "last_updated": "2026-02-12T02:29:59.452138+00:00"
 }

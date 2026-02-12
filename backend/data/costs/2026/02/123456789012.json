@@ -19,7 +19,64 @@
         "DynamoDB": 1779.42
       },
       "fetched_at": "2026-02-12T02:00:38.401148+00:00"
+    },
+    {
+      "id": "9b3e7312-2fe1-47f4-be48-ddc3c1872c2c",
+      "aws_account_id": "123456789012",
+      "team_name": "Platform Team",
+      "month": "2026-02",
+      "total_cost": 7365.7,
+      "service_breakdown": {
+        "EC2": 2242.42,
+        "RDS": 511.29,
+        "S3": 1401.15,
+        "Lambda": 820.09,
+        "CloudFront": 753.88,
+        "ECS": 531.56,
+        "EKS": 400.46,
+        "DynamoDB": 704.85
+      },
+      "ai_analysis": "Cost decreased by 84.3%.\n\nTop cost changes:\n\u2022 S3: \u2193 $11,044.31 (-88.7%)\n\u2022 DynamoDB: \u2193 $7,937.24 (-91.8%)\n\u2022 EC2: \u2193 $7,611.81 (-77.2%)\n",
+      "fetched_at": "2026-02-12T02:29:59.448710+00:00"
+    },
+    {
+      "id": "d87bf162-3ae1-4741-98a7-0f03fad61ac9",
+      "aws_account_id": "123456789012",
+      "team_name": "Platform Team",
+      "month": "2026-02",
+      "total_cost": 35613.09,
+      "service_breakdown": {
+        "EC2": 6956.58,
+        "RDS": 4160.52,
+        "S3": 3905.4,
+        "Lambda": 4068.36,
+        "CloudFront": 1326.46,
+        "ECS": 2183.02,
+        "EKS": 505.83,
+        "DynamoDB": 12506.92
+      },
+      "ai_analysis": "Cost decreased by 11.5%.\n\nTop cost changes:\n\u2022 DynamoDB: \u2191 $5,470.84 (+77.8%)\n\u2022 RDS: \u2193 $4,741.80 (-53.3%)\n\u2022 EKS: \u2193 $3,309.76 (-86.7%)\n",
+      "fetched_at": "2026-02-12T02:29:59.450448+00:00"
+    },
+    {
+      "id": "1f62c678-127b-4b22-8645-fab96dda88c5",
+      "aws_account_id": "123456789012",
+      "team_name": "Test Platform Team",
+      "month": "2026-02",
+      "total_cost": 44490.16,
+      "service_breakdown": {
+        "EC2": 14381.72,
+        "RDS": 3134.63,
+        "S3": 3788.98,
+        "Lambda": 8421.79,
+        "CloudFront": 5374.45,
+        "ECS": 2986.9,
+        "EKS": 1496.44,
+        "DynamoDB": 4905.26
+      },
+      "ai_analysis": "Cost increased by 60.4%.\n\nTop cost changes:\n\u2022 EC2: \u2191 $10,857.62 (+308.1%)\n\u2022 Lambda: \u2191 $8,037.15 (+2089.5%)\n\u2022 DynamoDB: \u2193 $4,285.31 (-46.6%)\n",
+      "fetched_at": "2026-02-12T02:29:59.451574+00:00"
     }
   ],
-  "last_updated": "2026-02-12T02:00:38.401209+00:00"
+  "last_updated": "2026-02-12T02:29:59.451618+00:00"
 }

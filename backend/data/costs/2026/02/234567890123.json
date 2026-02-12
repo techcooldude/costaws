@@ -19,7 +19,64 @@
         "DynamoDB": 5722.01
       },
       "fetched_at": "2026-02-12T02:00:38.401889+00:00"
+    },
+    {
+      "id": "ca517d06-8be7-4618-bddf-96efb04f4503",
+      "aws_account_id": "234567890123",
+      "team_name": "DevOps Team",
+      "month": "2026-02",
+      "total_cost": 22419.36,
+      "service_breakdown": {
+        "EC2": 2783.19,
+        "RDS": 5475.86,
+        "S3": 1216.07,
+        "Lambda": 2246.98,
+        "CloudFront": 2554.3,
+        "ECS": 1596.38,
+        "EKS": 1454.92,
+        "DynamoDB": 5091.65
+      },
+      "ai_analysis": "Cost increased by 42.1%.\n\nTop cost changes:\n\u2022 RDS: \u2191 $3,310.41 (+152.9%)\n\u2022 CloudFront: \u2191 $2,528.64 (+9854.4%)\n\u2022 DynamoDB: \u2191 $2,399.87 (+89.2%)\n",
+      "fetched_at": "2026-02-12T02:29:59.449501+00:00"
+    },
+    {
+      "id": "982bf972-0c7d-4dfa-96fa-94b11a0a7e38",
+      "aws_account_id": "234567890123",
+      "team_name": "DevOps Team",
+      "month": "2026-02",
+      "total_cost": 27576.07,
+      "service_breakdown": {
+        "EC2": 5295.07,
+        "RDS": 1534.65,
+        "S3": 952.5,
+        "Lambda": 5541.66,
+        "CloudFront": 301.02,
+        "ECS": 3413.19,
+        "EKS": 948.53,
+        "DynamoDB": 9589.45
+      },
+      "ai_analysis": "Cost decreased by 19.5%.\n\nTop cost changes:\n\u2022 RDS: \u2193 $8,979.65 (-85.4%)\n\u2022 S3: \u2193 $6,380.72 (-87.0%)\n\u2022 Lambda: \u2191 $4,529.72 (+447.6%)\n",
+      "fetched_at": "2026-02-12T02:29:59.450937+00:00"
+    },
+    {
+      "id": "ddf515b2-baa0-4f54-8bfc-7117b7ef2fc0",
+      "aws_account_id": "234567890123",
+      "team_name": "Test DevOps Team",
+      "month": "2026-02",
+      "total_cost": 46597.47,
+      "service_breakdown": {
+        "EC2": 8599.73,
+        "RDS": 11166.22,
+        "S3": 513.81,
+        "Lambda": 2371.33,
+        "CloudFront": 7377.85,
+        "ECS": 6190.3,
+        "EKS": 3792.69,
+        "DynamoDB": 6585.54
+      },
+      "ai_analysis": "Cost increased by 39.4%.\n\nTop cost changes:\n\u2022 S3: \u2193 $4,939.26 (-90.6%)\n\u2022 CloudFront: \u2191 $4,553.65 (+161.2%)\n\u2022 DynamoDB: \u2191 $4,075.56 (+162.4%)\n",
+      "fetched_at": "2026-02-12T02:29:59.452561+00:00"
     }
   ],
-  "last_updated": "2026-02-12T02:00:38.401920+00:00"
+  "last_updated": "2026-02-12T02:29:59.452608+00:00"
 }
