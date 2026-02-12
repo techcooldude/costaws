@@ -55,6 +55,7 @@ scheduler = AsyncIOScheduler()
 class S3Storage:
     """
     S3-based storage for all application data.
+    Falls back to local file storage if S3 credentials not configured.
     
     Bucket Structure:
     ├── config/
@@ -71,13 +72,25 @@ class S3Storage:
     
     def __init__(self):
         self.bucket_name = os.environ.get('S3_BUCKET_NAME', 'aws-cost-agent-data')
-        self.s3_client = boto3.client(
-            's3',
-            aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
-            aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY'),
-            region_name=os.environ.get('AWS_REGION', 'us-east-1')
-        )
-        self._ensure_bucket_exists()
+        self.aws_key = os.environ.get('AWS_ACCESS_KEY_ID', '')
+        self.aws_secret = os.environ.get('AWS_SECRET_ACCESS_KEY', '')
+        self.use_s3 = bool(self.aws_key and self.aws_secret)
+        
+        # Local storage fallback directory
+        self.local_storage_dir = Path('/app/backend/data')
+        
+        if self.use_s3:
+            self.s3_client = boto3.client(
+                's3',
+                aws_access_key_id=self.aws_key,
+                aws_secret_access_key=self.aws_secret,
+                region_name=os.environ.get('AWS_REGION', 'us-east-1')
+            )
+            self._ensure_bucket_exists()
+        else:
+            logger.warning("S3 credentials not configured - using local file storage for demo")
+            self.local_storage_dir.mkdir(parents=True, exist_ok=True)
+            self.s3_client = None
     
     def _ensure_bucket_exists(self):
         """Create bucket if it doesn't exist"""
