@@ -42,8 +42,8 @@ import secrets
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# Import LLM after loading env
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+# Import Google Generative AI
+import google.generativeai as genai
 
 # Create the main app
 app = FastAPI(title="AWS Cost AI Agent", version="3.1.0")
