@@ -1,0 +1,48 @@
+[Unit]
+Description=AWS Cost AI Agent (Internal Network Only)
+Documentation=https://github.com/techcooldude/costaws
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aws-cost-agent
+Group=aws-cost-agent
+WorkingDirectory=/opt/aws-cost-agent/NEWCODE
+
+# Environment
+Environment="PATH=/opt/aws-cost-agent/NEWCODE/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONDONTWRITEBYTECODE=1"
+EnvironmentFile=/opt/aws-cost-agent/NEWCODE/.env
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/aws-cost-agent/NEWCODE/data
+ReadWritePaths=/opt/aws-cost-agent/NEWCODE/logs
+ReadWritePaths=/var/log/aws-cost-agent
+
+# Process management
+ExecStart=/opt/aws-cost-agent/NEWCODE/venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 4
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStartSec=30
+TimeoutStopSec=30
+Restart=always
+RestartSec=10
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aws-cost-agent
+
+[Install]
+WantedBy=multi-user.target

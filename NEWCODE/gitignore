@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Environment & Secrets
+.env
+.env.local
+.env.production
+
+# GCP Credentials - NEVER COMMIT THIS
+gcp-service-account.json
+*-service-account.json
+*.json
+!package.json
+
+# AWS Credentials
+.aws/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Local storage
+data/*
+!data/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary files
+*.tmp
+*.bak

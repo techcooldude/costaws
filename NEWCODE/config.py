@@ -1,11 +1,12 @@
 """
-Configuration with Vertex AI and Internal Security
+Configuration with Vertex AI and Internal Network Security
 """
 import os
 from typing import List, Optional
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
+
 
 class Settings(BaseSettings):
     """Application settings - Internal network only"""
@@ -15,30 +16,27 @@ class Settings(BaseSettings):
     VERSION: str = "3.2.0"
     ENVIRONMENT: str = "production"
     
-    # Server - INTERNAL ONLY
-    HOST: str = "127.0.0.1"  # Changed from 0.0.0.0 to localhost only
+    # Server - INTERNAL ONLY (localhost binding)
+    HOST: str = "127.0.0.1"  # NO external access!
     PORT: int = 8000
     WORKERS: int = 4
-    UNIX_SOCKET: Optional[str] = None  # "/var/run/aws-cost-agent.sock"
     
-    # Security - API Key still needed for internal auth
+    # Security
     AGENT_API_KEY: str = ""
     DISABLE_AUTH: bool = False
-    
-    # CORS - Internal IPs only
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
-    ALLOWED_INTERNAL_IPS: List[str] = ["127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12"]
+    ALLOWED_INTERNAL_IPS: List[str] = ["127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
     
     # AWS
     AWS_REGION: str = "us-east-1"
     S3_BUCKET_NAME: str = "aws-cost-agent-data"
-    USE_SECRETS_MANAGER: bool = True  # Load secrets from AWS Secrets Manager
+    USE_SECRETS_MANAGER: bool = True
     SECRETS_MANAGER_SECRET_NAME: str = "aws-cost-agent/secrets"
     
-    # Google Cloud - Vertex AI (Service Account Auth)
+    # Google Cloud - Vertex AI (Service Account)
     GCP_PROJECT_ID: str = ""
     GCP_LOCATION: str = "us-central1"
-    GOOGLE_APPLICATION_CREDENTIALS: str = ""  # Path to service account JSON
+    GOOGLE_APPLICATION_CREDENTIALS: str = ""
     VERTEX_AI_MODEL: str = "gemini-1.5-flash"
     
     # Datadog
@@ -70,10 +68,16 @@ class Settings(BaseSettings):
     )
     
     def get_admin_emails(self) -> List[str]:
+        """Parse admin emails from comma-separated string"""
+        if not self.ADMIN_EMAILS:
+            return []
         return [e.strip() for e in self.ADMIN_EMAILS.split(",") if e.strip()]
+
 
 @lru_cache()
 def get_settings() -> Settings:
+    """Get cached settings instance"""
     return Settings()
+
 
 settings = get_settings()

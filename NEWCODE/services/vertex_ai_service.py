@@ -1,17 +1,18 @@
 """
 Vertex AI Service with Service Account Authentication
-Replaces AI Studio API key approach
+Replaces AI Studio API key approach - Enterprise-grade security
 """
 import os
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
+import json
 
 # Vertex AI imports
 from google.cloud import aiplatform
 from google.oauth2 import service_account
 import vertexai
-from vertexai.generative_models import GenerativeModel, Part, Content
+from vertexai.generative_models import GenerativeModel
 
 from app.config import settings
 
@@ -51,7 +52,7 @@ class VertexAIService:
             else:
                 # Try Application Default Credentials (ADC)
                 logger.info("Using Application Default Credentials (ADC)")
-                self.credentials = None  # Will use ADC
+                self.credentials = None
             
             # Initialize Vertex AI
             vertexai.init(
@@ -70,7 +71,7 @@ class VertexAIService:
             logger.error(f"Failed to initialize Vertex AI: {e}")
             self.initialized = False
     
-    async def _generate_content(self, prompt: str, system_instruction: str = "") -> str:
+    def _generate_content(self, prompt: str, system_instruction: str = "") -> str:
         """Generate content using Vertex AI"""
         if not self.initialized:
             logger.warning("Vertex AI not initialized, returning empty response")
@@ -116,17 +117,17 @@ Previous Month: ${team_data.get('previous_month_cost', 0):,.2f}
 Change: {team_data.get('percentage_change', 0):.1f}%
 
 Service Breakdown (Current):
-{self._format_dict(team_data.get('service_breakdown', {}))}
+{json.dumps(team_data.get('service_breakdown', {}), indent=2)}
 
 Service Breakdown (Previous):
-{self._format_dict(team_data.get('previous_service_breakdown', {}))}
+{json.dumps(team_data.get('previous_service_breakdown', {}), indent=2)}
 
 Provide:
 1. Root cause analysis (why did costs change?)
 2. Top 3 cost drivers
 3. Specific optimization recommendations"""
 
-            response = await self._generate_content(prompt, system_instruction)
+            response = self._generate_content(prompt, system_instruction)
             
             if response:
                 return {
@@ -167,7 +168,7 @@ Provide:
 3. Key factors affecting the prediction
 4. Potential risks that could increase costs"""
 
-            response = await self._generate_content(prompt, system_instruction)
+            response = self._generate_content(prompt, system_instruction)
             
             if response:
                 return {
@@ -207,10 +208,10 @@ Total Previous Month: ${total_previous:,.2f}
 Overall Change: {((total_current - total_previous) / total_previous * 100) if total_previous > 0 else 0:.1f}%
 
 Top 10 Spending Teams:
-{self._format_list([{'team': t['team_name'], 'cost': t['current_month_cost'], 'change': t['percentage_change']} for t in top_spenders])}
+{json.dumps([{'team': t['team_name'], 'cost': t['current_month_cost'], 'change': t['percentage_change']} for t in top_spenders], indent=2)}
 
 Top Anomalies (cost spikes):
-{self._format_list([{'team': t['team_name'], 'cost': t['current_month_cost'], 'change': t['percentage_change']} for t in top_anomalies])}
+{json.dumps([{'team': t['team_name'], 'cost': t['current_month_cost'], 'change': t['percentage_change']} for t in top_anomalies], indent=2)}
 
 Provide:
 1. Top 5 organization-wide cost optimization opportunities
@@ -218,7 +219,7 @@ Provide:
 3. Reserved Instance / Savings Plan recommendations
 4. Quick wins (actions that can save money this week)"""
 
-            response = await self._generate_content(prompt, system_instruction)
+            response = self._generate_content(prompt, system_instruction)
             
             if response:
                 return {
@@ -258,29 +259,19 @@ Month-over-Month Change: {((total_current - total_previous) / total_previous * 1
 Cost Anomalies Detected: {len(all_anomalies)}
 
 Top anomalies:
-{self._format_list([{'team': a.get('team_name'), 'change': a.get('percentage_change')} for a in all_anomalies[:5]])}
+{json.dumps([{'team': a.get('team_name'), 'change': a.get('percentage_change')} for a in all_anomalies[:5]], indent=2)}
 
 Write a 3-4 sentence executive summary highlighting:
 1. Overall cost trend
 2. Key concerns
 3. Recommended immediate actions"""
 
-            response = await self._generate_content(prompt, system_instruction)
+            response = self._generate_content(prompt, system_instruction)
             return response if response else self._basic_executive_summary(all_teams_data, all_anomalies)
             
         except Exception as e:
             logger.error(f"Executive summary generation failed: {e}")
             return self._basic_executive_summary(all_teams_data, all_anomalies)
-    
-    def _format_dict(self, data: Dict) -> str:
-        """Format dictionary for prompt"""
-        import json
-        return json.dumps(data, indent=2)
-    
-    def _format_list(self, data: List) -> str:
-        """Format list for prompt"""
-        import json
-        return json.dumps(data, indent=2)
     
     def _basic_analysis(self, team_data: Dict) -> Dict[str, Any]:
         """Fallback basic analysis without AI"""
