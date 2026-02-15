@@ -1,0 +1,40 @@
+[Unit]
+Description=AWS Cost AI Agent
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=aws-cost-agent
+Group=aws-cost-agent
+WorkingDirectory=/opt/aws-cost-agent
+Environment="PATH=/opt/aws-cost-agent/venv/bin"
+EnvironmentFile=/opt/aws-cost-agent/.env
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/aws-cost-agent/data /var/log/aws-cost-agent
+
+# Process management
+ExecStart=/opt/aws-cost-agent/venv/bin/gunicorn app.main:app -c /opt/aws-cost-agent/gunicorn.conf.py
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=always
+RestartSec=10
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aws-cost-agent
+
+[Install]
+WantedBy=multi-user.target
